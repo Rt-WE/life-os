@@ -1181,7 +1181,7 @@
                 targetTaskRef.startTime = tempTime;
                 targetTaskRef.duration = tempDuration;
                 
-                if (taskToMoveRef.preId === null && taskToMoveRef.childIds.length > 0) {
+                if (taskToMoveRef.childIds.length > 0) {
                     const confirmUpdateA = confirm(
                         `任务 [${taskToMoveRef.title}] 是复习链表父节点，时间已被交换为 ${taskToMoveRef.startTime} / ${taskToMoveRef.duration}m。\n` +
                         `是否将新的时间/时长传导给后续 ${taskToMoveRef.childIds.length} 个子任务？`
@@ -1196,7 +1196,7 @@
                     }
                 }
 
-                if (targetTaskRef.preId === null && targetTaskRef.childIds.length > 0) {
+                if (targetTaskRef.childIds.length > 0) {
                     const confirmUpdateB = confirm(
                         `任务 [${targetTaskRef.title}] 是复习链表父节点，时间已被交换为 ${targetTaskRef.startTime} / ${targetTaskRef.duration}m。\n` +
                         `是否将新的时间/时长传导给后续 ${targetTaskRef.childIds.length} 个子任务？`
@@ -1342,7 +1342,7 @@
                         const timeChanged = originalTask.startTime !== taskData.startTime || originalTask.duration !== taskData.duration;
                         
                         // 如果是父节点且时间发生变化，进行提示
-                        if (timeChanged && taskData.childIds && taskData.childIds.length > 0 && taskData.preId === null) {
+                        if (timeChanged && taskData.childIds && taskData.childIds.length > 0) {
                             const confirmUpdate = confirm(
                                 `任务 [${taskData.title}] 是复习链表父节点。\n` +
                                 `时间或时长已被修改为 ${taskData.startTime || '无时间'} / ${taskData.duration || 0}m。\n` +
@@ -1373,7 +1373,7 @@
 
     const taskToDelete = tasks.value[taskIndex];
 
-    if (taskToDelete.preId === null && taskToDelete.childIds.length > 0) {
+    if (taskToDelete.childIds.length > 0) {
         if (!confirm(`任务 [${taskToDelete.title}] 是复习父节点，确认删除它吗？`)) {
             return; 
         }
@@ -1451,7 +1451,7 @@
                 task.status = task.status === '已完成' ? '未开始' : '已完成';
 
                 // 如果是复习链表的父节点，且完成了，提示完成子节点 (可选)
-                if (task.status === '已完成' && task.preId === null && task.childIds.length > 0) {
+                if (task.status === '已完成' &&task.childIds.length > 0) {
                     if (confirm(`任务 [${task.title}] 是复习父节点，是否一并完成所有 ${task.childIds.length} 个子任务？`)) {
                         let nextId = task.childIds[0];
                         while(nextId) {
@@ -1866,7 +1866,7 @@
                 // 如果是任务，且是复习链表父节点，则关联整个链表
                 if (type === 'task') {
                     const targetTask = tasks.value.find(t => t.id === refId);
-                    if (targetTask && targetTask.childIds.length > 0 && targetTask.preId === null) {
+                    if (targetTask && targetTask.childIds.length > 0) {
                         // 关联父节点
                         currentMilestone.value.contents.push({ type, refId }); 
                         
