@@ -128,22 +128,18 @@
                     <option value="p4">P4 ⚫</option>
                 </select>
             </div>
-            
-            <!-- 交换模式开关 -->
-            <div class="flex items-center space-x-2 ml-4">
-                <button @click="toggleExchangeMode" 
-                        class="px-2 py-1 text-sm rounded border"
-                        :class="exchangeMode ? 'bg-blue-600 text-white border-blue-700' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'">
-                    {{ exchangeMode ? '🔄 交换模式中 (点击任务交换时间)' : '🔄 交换时间' }}
-                </button>
-            </div>
         </div>
         <button @click="openTaskModal('create', null, selectedDate)" class="bg-blue-600 text-white px-3 py-1 rounded shadow text-sm">+ 插入任务</button>
     </div>
-    
+    <div class="flex items-center space-x-2 ml-4">
+                <button @click="toggleExchangeMode" 
+                        class="px-2 py-1 text-sm rounded border"
+                        :class="exchangeMode ? 'bg-blue-600 text-white border-blue-700' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'">
+                    {{ exchangeMode ? '🔄 交换模式中(点击交换)' : '🔄 交换时间' }}
+                </button>
+    </div>
     <div class="flex-1 overflow-y-auto bg-white rounded shadow p-4">
          <h3 class="text-sm font-bold mb-3 border-b pb-2">今日任务列表</h3>
-         
          <div v-if="dayTasks.length === 0" class="text-center py-10 text-gray-500">
              今日无任务，请添加或从任务库中排程。
          </div>
@@ -1103,7 +1099,6 @@ const clickExchangeTask = (task) => {
         // 退出交换模式
         exchangeMode.value = false;
         taskToExchange.value = null;
-        alert('时间交换完成！');
     }
 };
             const checkTaskConflict = (task, allTasksInDay) => {
