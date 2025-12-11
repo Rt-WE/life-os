@@ -1,0 +1,2000 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isBetween.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/weekday.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/locale/zh-cn.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isSameOrBefore.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isSameOrAfter.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/customParseFormat.js"></script>
+    
+    <script>
+        dayjs.extend(dayjs_plugin_isBetween);
+        dayjs.extend(dayjs_plugin_weekday);
+        dayjs.extend(dayjs_plugin_isSameOrBefore);
+        dayjs.extend(dayjs_plugin_isSameOrAfter);
+        dayjs.extend(dayjs_plugin_customParseFormat);
+        dayjs.locale('zh-cn'); // 设置中文语言环境，默认周一为一周的开始
+    </script>
+    
+    <style>
+        body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5; }
+        /* 冲突任务标红 */
+        .conflict-border { border: 2px solid #ef4444 !important; background-color: #fef2f2 !important; }
+        .timeline-slot { transition: all 0.3s ease; }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        .modal-bg { z-index: 50; }
+        .modal-content { z-index: 60; }
+        /* 周/日视图中每小时高度定义 */
+        .hour-slot { height: 60px; } 
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col">
+
+<div id="app" class="flex-1 flex flex-col h-full overflow-hidden">
+        <div class="space-x-3">
+            <button @click="triggerImport" class="text-sm text-gray-600 hover:text-blue-600">📥 导入数据</button>
+            <button @click="exportData" class="text-sm text-gray-600 hover:text-green-600">📤 导出数据</button>
+            <input type="file" ref="fileInput" @change="handleImport" class="hidden" accept=".json">
+        </div>
+    </header>
+    
+    <div class="flex-1 flex overflow-hidden">
+        
+        <main class="flex-1 overflow-hidden relative bg-gray-50 flex flex-col">
+            
+            <div v-if="['day', 'schedule', 'month'].includes(currentView)" class="shrink-0 bg-white shadow-md border-b sticky top-0 z-30">
+                <div class="flex space-x-6 px-6 py-2">
+                    <button @click="currentView = 'day'" 
+                            :class="{'text-blue-600 border-b-2 border-blue-600 font-bold': currentView === 'day'}"
+                            class="pb-1 text-sm text-gray-600 hover:text-blue-600 transition">
+                        ☀️ 日视图
+                    </button>
+                    <button @click="currentView = 'schedule'" 
+                            :class="{'text-blue-600 border-b-2 border-blue-600 font-bold': currentView === 'schedule'}"
+                            class="pb-1 text-sm text-gray-600 hover:text-blue-600 transition">
+                        🗓️ 周排程
+                    </button>
+                    <button @click="currentView = 'month'" 
+                            :class="{'text-blue-600 border-b-2 border-blue-600 font-bold': currentView === 'month'}"
+                            class="pb-1 text-sm text-gray-600 hover:text-blue-600 transition">
+                        📅 月历
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="currentView === 'month'" class="flex-1 flex flex-col p-4 overflow-hidden">
+                <div class="bg-white p-3 rounded shadow-sm mb-4 shrink-0 flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <button @click="changeMonth(-1)" class="p-1 hover:bg-gray-100 rounded text-xl">⬅</button>
+                        <div class="text-lg font-bold">
+                            {{ dayjs(selectedMonthStart).format('YYYY年MM月') }}
+                        </div>
+                        <button @click="changeMonth(1)" class="p-1 hover:bg-gray-100 rounded text-xl">➡</button>
+                        <button @click="goToTodayMonth" class="text-xs text-blue-500 underline">回到本月</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 bg-white rounded shadow p-4 overflow-y-auto">
+                    <div class="grid grid-cols-7 text-center font-bold text-gray-600 border-b pb-2 mb-2">
+                        <div v-for="d in ['周一', '周二', '周三', '周四', '周五', '周六', '周日']" :key="d">{{ d }}</div>
+                    </div>
+                    
+                    <div class="grid grid-cols-7 gap-1 h-[calc(100%-40px)]">
+                        <div v-for="d in monthCalendar" :key="d.date" 
+                             @click="goToDay(d.date)"
+                             class="p-2 border rounded cursor-pointer transition relative"
+                             :class="[d.isCurrentMonth ? 'bg-white hover:bg-blue-50' : 'bg-gray-100 text-gray-400 hover:bg-gray-200', 
+                                     {'border-blue-500 ring-2 ring-blue-200 font-bold': d.date === todayDate}]"
+                            >
+                            <div class="text-sm font-bold">{{ dayjs(d.date).date() }}</div>
+                            <div v-if="d.count > 0" class="mt-2 text-xs">
+                                <span v-if="d.habitCount > 0" class="block text-green-600">✅ {{ d.habitDone }}/{{ d.habitCount }} 习惯</span>
+                                <span v-if="d.taskCount > 0" class="block text-blue-600">📝 {{ d.taskCount }} 任务</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div v-if="currentView === 'day'" class="flex-1 flex flex-col p-4 overflow-hidden">
+                <div class="bg-white p-3 rounded shadow-sm mb-4 shrink-0 flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <button @click="changeDate(-1)" class="p-1 hover:bg-gray-100 rounded text-xl">⬅</button>
+                        <div class="text-center">
+                            <div class="text-xl font-bold">{{ dayjs(selectedDate).format('YYYY年MM月DD日') }}</div>
+                            <div class="text-xs text-gray-500">{{ getWeekDay(selectedDate) }} ({{ dayTasks.length }} 项任务)</div>
+                        </div>
+                        <button @click="changeDate(1)" class="p-1 hover:bg-gray-100 rounded text-xl">➡</button>
+                        <button @click="selectedDate = todayDate" class="text-xs text-blue-500 underline">回到今天</button>
+
+                        <div class="flex items-center space-x-2 ml-4">
+                            <label class="text-sm text-gray-600">筛选优先级:</label>
+                            <select v-model="selectedPriorityFilter" class="p-1 border rounded text-sm">
+                                <option value="all">全部</option>
+                                <option value="p1">P1 🔴</option>
+                                <option value="p2">P2 🟡</option>
+                                <option value="p3">P3 🔵</option>
+                                <option value="p4">P4 ⚫</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button @click="openTaskModal('create', null, selectedDate)" class="bg-blue-600 text-white px-3 py-1 rounded shadow text-sm">+ 插入任务</button>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto bg-white rounded shadow p-4">
+                     <h3 class="text-sm font-bold mb-3 border-b pb-2">今日任务列表 (拖拽可交换位置，有时间任务会交换时间)</h3>
+                     
+                     <div v-if="dayTasks.length === 0" class="text-center py-10 text-gray-500">
+                         今日无任务，请添加或从任务库中排程。
+                     </div>
+
+                     <div v-for="(task, index) in dayTasks" :key="task.id"
+                          :draggable="task.status!=='已完成'"
+                          @dragstart="dragStart(task.id, index)"
+                          @dragover.prevent
+                          @drop="dropTask(task.id, index)"
+                          @dragenter.prevent="$event.target.closest('div.task-item').classList.add('opacity-50')"
+                          @dragleave.prevent="$event.target.closest('div.task-item').classList.remove('opacity-50')"
+                          @click="openTaskModal('edit', task)"
+                          class="task-item flex justify-between items-center p-3 rounded mb-2 border hover:shadow-md transition cursor-grab"
+                          :class="{'bg-green-50/50 border-green-200 line-through': task.status==='已完成', 
+                                   'bg-white border-gray-200': task.status!=='已完成',
+                                   'conflict-border': task.hasConflict && task.status!=='已完成'}">
+
+                         <div class="flex items-center space-x-3 w-1/2">
+                             <button @click.stop="toggleTaskStatus(task)" class="text-lg shrink-0">{{ task.status==='已完成' ? '✅' : '⬜' }}</button>
+                             <div class="text-sm font-medium">
+                                 <span v-if="task.preId" class="text-xs text-yellow-600 mr-1">[复习子节点]</span>
+                                 <span v-else-if="task.childIds && task.childIds.length > 0" class="text-xs text-indigo-600 mr-1">[复习父节点]</span>
+                                 {{ task.title }}
+                             </div>
+                         </div>
+                         
+                         <div class="flex space-x-4 items-center text-xs text-gray-600">
+                             <div class="bg-blue-100 px-2 py-1 rounded shrink-0" v-if="task.startTime && task.duration">
+                                 ⏱️ {{ task.startTime }} ({{ task.duration }}m)
+                                 <span v-if="task.hasConflict" class="text-red-500 ml-1">⚠️冲突</span>
+                             </div>
+                             <div v-else class="text-gray-400">
+                                 (灵活任务)
+                             </div>
+                             <span :class="getPriorityColor(task.priority)" class="w-3 h-3 rounded-full shrink-0"></span>
+                         </div>
+                     </div>
+                </div>
+            </div>
+
+            <div v-if="currentView === 'schedule'" class="flex-1 flex flex-col p-4 overflow-hidden">
+                
+                <div class="bg-white p-3 rounded shadow-sm mb-4 shrink-0 flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <button @click="changeWeek(-1)" class="p-1 hover:bg-gray-100 rounded text-xl">⬅</button>
+                        <div class="text-lg font-bold">
+                            {{ dayjs(weekDays[0].date).format('YYYY年MM月DD日') }} 
+                            - 
+                            {{ dayjs(weekDays[6].date).format('MM月DD日') }}
+                        </div>
+                        <button @click="changeWeek(1)" class="p-1 hover:bg-gray-100 rounded text-xl">➡</button>
+                        <button @click="goToTodayWeek" class="text-xs text-blue-500 underline">回到本周</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto bg-white rounded shadow flex">
+                    <div class="w-16 shrink-0 bg-gray-50 border-r pt-10 relative">
+                        <div v-for="hour in 24" :key="hour" class="hour-slot text-xs text-right pr-2 text-gray-500">
+                            {{ hour - 1 < 10 ? '0' : '' }}{{ hour - 1 }}:00
+                        </div>
+                    </div>
+
+                    <div class="flex-1 grid grid-cols-7 border-collapse relative">
+                        <div v-for="day in weekDays" :key="day.date" 
+                             class="h-10 text-center border-b border-r sticky top-0 bg-white z-10 p-2"
+                             :class="{'bg-blue-100/50': day.date === todayDate}">
+                            <div class="text-sm font-bold">{{ day.dayName }}</div>
+                            <div class="text-xs" :class="{'text-blue-600 font-bold': day.date === todayDate}">{{ dayjs(day.date).date() }}</div>
+                        </div>
+
+                        <div v-for="day in weekDays" :key="'bg-'+day.date" 
+                            class="absolute inset-x-0 bottom-0 grid grid-rows-24 border-r"
+                            :style="{
+                            left: (day.dayIndex * (100 / 7)) + '%', 
+                            width: (100 / 7) + '%', 
+                            top: '40px',
+                            height: 'calc(24 * 60px)'
+                            }">
+                            <div v-for="h in 24" :key="h" class="border-b border-dotted hour-slot"></div>
+                        </div>
+
+
+                        <template v-for="day in weekDays" :key="'task-col-'+day.date">
+                            <div v-if="tasksForWeek[day.date] && tasksForWeek[day.date].filter(t => t.startTime && t.duration).length > 0" 
+                                 class="absolute top-10 bottom-0"
+                                 :style="{left: (day.dayIndex * (100 / 7)) + '%', width: (100 / 7) + '%'}">
+                                
+                                <div v-for="task in tasksForWeek[day.date].filter(t => t.startTime && t.duration)" :key="task.id"
+                                     class="absolute w-[95%] left-[2.5%] rounded-lg p-1 text-[10px] overflow-hidden cursor-pointer shadow hover:shadow-lg transition z-20"
+                                     :class="[getPriorityColor(task.priority).replace('bg', 'bg').replace('500', '100'), getPriorityBorderColor(task.priority).replace('l', 'l'), {'opacity-50 line-through': task.status==='已完成'}]"
+                                     :style="getTaskPosition(task, true)"
+                                     @click="openTaskModal('edit', task)">
+                                    
+                                    <div class="font-bold text-gray-800">{{ task.title }}</div>
+                                    <div class="text-gray-600">{{ task.startTime }} ({{ task.duration }}m)</div>
+                                </div>
+                            </div>
+                        </template>
+                        
+                        <div v-if="Object.keys(tasksForWeek).length === 0" class="absolute inset-0 flex items-center justify-center text-gray-400">
+                            本周暂无排程任务，灵活任务请在日视图或任务库查看。
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentView === 'habit'" class="flex-1 overflow-y-auto p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">✨ 习惯养成 (Habits)</h2>
+                    <button @click="openHabitModal('create')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded shadow flex items-center">
+                        <span class="mr-1">+</span> 新建习惯模板
+                    </button>
+                </div>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <div v-for="habit in habits" :key="habit.id" 
+                         class="bg-white rounded-xl shadow-sm hover:shadow-md transition p-5 border-l-4 relative"
+                         :class="habit.type === 'abstinence' ? 'border-red-500' : 'border-green-500'">
+                        
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <h3 class="font-bold text-lg flex items-center">
+                                    {{ habit.name }}
+                                </h3>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    {{ habit.type==='action'?'坚持型':'戒断型' }}
+                                </div>
+                            </div>
+                            <div class="flex space-x-1">
+                                <button @click="openHabitModal('edit', habit)" class="text-gray-400 hover:text-blue-500 p-1">✎</button>
+                                <button @click="deleteHabit(habit.id)" class="text-gray-400 hover:text-red-500 p-1">🗑</button>
+                            </div>
+                        </div>
+
+                        <p class="text-sm text-gray-600 mb-4 h-10 overflow-hidden text-ellipsis">{{ habit.desc }}</p>
+                        <div class="grid grid-cols-3 gap-2 text-center mb-4">
+                            <div class="bg-blue-50 p-2 rounded">
+                                <div class="text-lg font-bold text-blue-600">{{ habit.stats.currentStreak }}</div>
+                                <div class="text-[10px] text-gray-500">当前连续</div>
+                            </div>
+                            <div class="bg-green-50 p-2 rounded">
+                                <div class="text-lg font-bold text-green-600">{{ calculateRate(habit) }}%</div>
+                                <div class="text-[10px] text-gray-500">打卡率</div>
+                            </div>
+                        </div>
+
+                        <div v-if="isTodayARestDay(habit)">
+                            <button disabled class="w-full py-2 bg-gray-100 text-gray-500 rounded font-bold cursor-not-allowed">今日休息 🛌</button>
+                        </div>
+                        <div v-else>
+                            <button v-if="isHabitDoneToday(habit)" disabled class="w-full py-2 bg-green-100 text-green-700 rounded font-bold cursor-not-allowed">今日已完成 ✅</button>
+                            <button v-else @click="checkInHabit(habit)" class="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold shadow transition">打卡 (Check-in)</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+<div v-if="currentView === 'short_term'" class="flex-1 flex flex-col p-6">
+    <div class="flex justify-between items-center mb-4 shrink-0">
+        <h2 class="text-2xl font-bold text-gray-800">📝 短期 & 学习任务库</h2>
+        <button @click="openTaskModal('create', null)" class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700">+ 新建任务</button>
+    </div>
+    <div class="bg-white p-3 rounded-lg shadow-sm mb-4 shrink-0">
+        <div class="flex items-center space-x-4 text-sm mb-2">
+            <label class="font-medium text-gray-700 shrink-0">筛选:</label>
+            
+            <select v-model="shortTermFilterStatus" class="p-1 border rounded text-sm w-32">
+                <option value="all">全部状态</option>
+                <option value="uncompleted">未完成</option>
+                <option value="completed">已完成</option>
+            </select>
+            
+            <select v-model="shortTermFilterPriority" class="p-1 border rounded text-sm w-32">
+                <option value="all">全部优先级</option>
+                <option value="p1">P1 🔴</option>
+                <option value="p2">P2 🟡</option>
+                <option value="p3">P3 🔵</option>
+                <option value="p4">P4 ⚫</option>
+            </select>
+        </div>
+        
+        <div class="flex items-center space-x-3 text-sm">
+            <label class="text-gray-600 shrink-0">计划日期范围:</label>
+            <div class="flex items-center space-x-2 flex-1">
+                <input type="date" v-model="shortTermFilterStartDate" class="p-1 border rounded text-sm w-32">
+                <span class="text-gray-500">至</span>
+                <input type="date" v-model="shortTermFilterEndDate" class="p-1 border rounded text-sm w-32">
+                <button @click="shortTermFilterStartDate=''; shortTermFilterEndDate='';" 
+                        class="text-xs text-red-500 hover:text-red-700 underline shrink-0">
+                    清空日期
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white rounded-lg shadow flex-1 overflow-hidden flex flex-col">
+        <div class="h-[500px] overflow-y-auto">
+            <table class="w-full text-sm text-left">
+                <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0">
+                    <tr>
+                        <th class="p-3">完成</th>
+                        <th class="p-3">标题</th>
+                        <th class="p-3">优先级</th>
+                        <th class="p-3">计划日期 (年/月/日)</th>
+                        <th class="p-3 text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y">
+                    <tr v-for="task in filteredShortTasks" :key="task.id" class="hover:bg-gray-50 group">
+                        <td class="p-3">
+                            <button @click.stop="toggleTaskStatus(task)" class="text-lg shrink-0">
+                                {{ task.status==='已完成' ? '✅' : '⬜' }}
+                            </button>
+                        </td>
+                        <td class="p-3 font-medium" :class="{'line-through text-gray-500': task.status==='已完成'}">
+                            {{ task.title }}
+                            <span v-if="task.preId" class="text-xs text-yellow-600 ml-1">(复习节点)</span>
+                            <span v-if="task.childIds && task.childIds.length > 0" class="text-xs text-indigo-600 ml-1">(父节点)</span>
+                        </td>
+                        <td class="p-3"><span :class="getPriorityColor(task.priority)" class="w-3 h-3 rounded-full inline-block mr-1"></span>{{ getPriorityLabel(task.priority) }}</td>
+                        <td class="p-3">{{ dayjs(task.plannedDate).format('YYYY-MM-DD') }}</td>
+                        <td class="p-3 text-right">
+                            <button @click="openTaskModal('edit', task)" class="text-blue-500 hover:underline mr-2">编辑</button>
+                            <button @click="deleteTask(task.id, true)" class="text-red-500 hover:underline">删除</button>
+                        </td>
+                    </tr>
+                    <tr v-if="filteredShortTasks.length===0">
+                        <td colspan="5" class="p-8 text-center text-gray-400">无符合条件的任务</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<div v-if="currentView === 'project'" class="flex-1 flex flex-col p-6 overflow-hidden">
+                 <div class="flex justify-between items-center mb-4 shrink-0">
+                    <h2 class="text-2xl font-bold text-gray-800">🏗 项目管理 (Projects)</h2>
+                    <button @click="openProjectModal('create')" class="bg-indigo-600 text-white px-4 py-2 rounded shadow">+ 新建项目</button>
+                </div>
+
+                <div class="flex-1 flex space-x-6 overflow-x-auto pb-2">
+                    <div v-for="proj in projects" :key="proj.id" class="w-96 flex flex-col bg-white rounded-xl shadow h-full shrink-0 border border-gray-200">
+                        <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                            <h3 class="font-bold text-lg truncate">{{ proj.name }}</h3>
+                            <div class="flex space-x-1">
+                                <button @click="openProjectModal('edit', proj)" class="text-xs text-gray-500 hover:text-blue-500">⚙</button>
+                                <button @click="deleteProject(proj.id)" class="text-xs text-gray-500 hover:text-red-500">🗑</button>
+                            </div>
+                        </div>
+                        
+                        <div class="h-2 bg-gray-200 w-full">
+                            <div class="h-full bg-indigo-500 rounded" :style="{width: calculateProjectProgress(proj)+'%'}"></div>
+                        </div>
+                        <div class="text-xs p-2 text-right text-indigo-600 font-bold">{{ calculateProjectProgress(proj) }}%</div>
+
+                        <div class="flex-1 overflow-y-auto p-3 space-y-4 bg-gray-100">
+                            <div v-for="(ms, idx) in proj.milestones" :key="ms.id" class="bg-white p-3 rounded shadow-sm border border-gray-200">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="font-bold text-sm text-indigo-700">🏁 {{ ms.name }}</span>
+                                    <button @click="deleteMilestone(proj, ms.id)" class="text-red-400 hover:text-red-600 p-1">🗑️</button>
+                                </div>
+                                
+                                <ul class="space-y-1 pl-2 mb-2">
+                                    <li v-for="item in ms.contents" :key="item.refId" class="text-xs flex justify-between items-center p-1 hover:bg-gray-50 rounded">
+                                        <span class="truncate max-w-[140px]" :class="{'line-through text-gray-400': isItemDone(item)}">
+                                            {{ getItemTitle(item) }}
+                                        </span>
+                                        <div class="flex space-x-1">
+                                             <span class="text-[10px] px-1 rounded border" :class="item.type==='habit'?'border-green-200 text-green-600':'border-blue-200 text-blue-600'">
+                                                {{ item.type==='habit'?'习惯':'任务' }}
+                                            </span>
+                                            <button @click="removeItemFromMilestone(ms, item.refId)" class="text-red-400 hover:text-red-600" title="取消关联">×</button>
+                                        </div>
+                                    </li>
+                                </ul>
+
+                                <button @click="openMilestoneContentModal(proj, ms)" class="w-full py-1 border border-dashed border-gray-300 text-gray-400 text-xs rounded hover:border-blue-400 hover:text-blue-500">
+                                    + 添加任务/习惯
+                                </button>
+                            </div>
+
+                            <button @click="openMilestoneModal(proj)" class="w-full py-2 bg-white border border-gray-300 text-gray-500 text-sm rounded shadow-sm hover:bg-gray-50">
+                                + 新增里程碑
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div v-if="currentView === 'stats'" class="p-6 overflow-y-auto bg-gray-50 flex-1">
+                <div class="max-w-6xl mx-auto space-y-6">
+                    
+                    <div class="flex items-center justify-between mb-2">
+                         <h2 class="text-2xl font-bold text-gray-800">📊 数据概览</h2>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
+                            <div class="p-3 bg-blue-100 text-blue-600 rounded-full text-xl">✅</div>
+                            <div>
+                                <div class="text-sm text-gray-500">总任务完成</div>
+                                <div class="text-2xl font-bold text-gray-800">{{ overallStats.totalDone }}</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
+                            <div class="p-3 bg-green-100 text-green-600 rounded-full text-xl">📈</div>
+                            <div>
+                                <div class="text-sm text-gray-500">总体完成率</div>
+                                <div class="text-2xl font-bold text-gray-800">{{ overallStats.completionRate }}%</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
+                            <div class="p-3 bg-purple-100 text-purple-600 rounded-full text-xl">✨</div>
+                            <div>
+                                <div class="text-sm text-gray-500">活跃习惯数</div>
+                                <div class="text-2xl font-bold text-gray-800">{{ overallStats.activeHabits }}</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
+                            <div class="p-3 bg-orange-100 text-orange-600 rounded-full text-xl">🔥</div>
+                            <div>
+                                <div class="text-sm text-gray-500">最长习惯连击</div>
+                                <div class="text-2xl font-bold text-gray-800">{{ overallStats.maxStreak }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="font-bold text-lg text-gray-700">📅 周任务趋势</h3>
+                            <div class="flex items-center space-x-4 text-sm">
+                                <button @click="changeStatsWeek(-1)" class="p-1 hover:bg-gray-100 rounded">⬅ 上周</button>
+                                <span class="font-medium text-gray-600">
+                                    {{ dayjs(statsWeekStart).format('YYYY年MM月DD日') }} - 
+                                    {{ dayjs(statsWeekStart).add(6, 'day').format('MM月DD日') }}
+                                </span>
+                                <button @click="changeStatsWeek(1)" class="p-1 hover:bg-gray-100 rounded">下周 ➡</button>
+                            </div>
+                        </div>
+
+                        <div class="h-48 flex items-end justify-between space-x-2 px-4">
+                            <div v-for="d in weeklyStatsData" :key="d.date" class="flex-1 flex flex-col items-center group relative">
+                                <div class="absolute bottom-full mb-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-10">
+                                    {{ d.date }}<br>完成: {{ d.done }} / 总计: {{ d.total }}
+                                </div>
+                                
+                                <div class="w-full max-w-[40px] bg-gray-100 rounded-t-lg relative h-32 flex items-end overflow-hidden">
+                                    <div class="w-full bg-blue-500 transition-all duration-500 hover:bg-blue-600"
+                                         :style="{ height: (d.total > 0 ? (d.done / d.total) * 100 : 0) + '%' }">
+                                    </div>
+                                    <div class="absolute bottom-0 w-full bg-blue-200 -z-10" 
+                                         :style="{ height: (weeklyStatsMax > 0 ? (d.total / weeklyStatsMax) * 100 : 0) + '%' }">
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-500 mt-2 font-medium">{{ d.dayName }}</div>
+                                <div class="text-[10px] text-gray-400">{{ d.done }}/{{ d.total }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                         <div class="flex justify-between items-center mb-6">
+                            <h3 class="font-bold text-lg text-gray-700">🔥 活跃度热力图 </h3>
+                            <div class="flex items-center space-x-4 text-sm">
+                                <button @click="changeStatsMonth(-1)" class="p-1 hover:bg-gray-100 rounded">⬅ 上月</button>
+                                <span class="font-medium text-gray-600">{{ dayjs(statsMonthStart).format('YYYY年MM月') }}</span>
+                                <button @click="changeStatsMonth(1)" class="p-1 hover:bg-gray-100 rounded">下月 ➡</button>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col items-center">
+                            <div class="grid grid-cols-7 gap-1 mb-1 w-full max-w-lg">
+                                <div v-for="w in ['一','二','三','四','五','六','日']" :key="w" class="text-center text-xs text-gray-400 pb-1">{{ w }}</div>
+                            </div>
+                            <div class="grid grid-cols-7 gap-1 w-full max-w-lg">
+                                <div v-for="(day, idx) in monthlyHeatmapData" :key="idx"
+                                     class="aspect-square rounded-sm relative group cursor-default"
+                                     :class="[day.isEmpty ? 'invisible' : getHeatmapColor(day.count)]">
+                                     
+                                    <div v-if="!day.isEmpty" class="absolute bottom-full mb-1 hidden group-hover:block bg-black/80 text-white text-xs rounded py-1 px-2 z-20 whitespace-nowrap left-1/2 -translate-x-1/2 pointer-events-none">
+                                        {{ day.date }}<br>活跃度: {{ day.count }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center text-xs text-gray-500 mt-4 space-x-2">
+                                <span>Less</span>
+                                <div class="w-3 h-3 bg-gray-100 rounded-sm"></div>
+                                <div class="w-3 h-3 bg-green-200 rounded-sm"></div>
+                                <div class="w-3 h-3 bg-green-400 rounded-sm"></div>
+                                <div class="w-3 h-3 bg-green-600 rounded-sm"></div>
+                                <span>More</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </main>
+    </div>
+    <nav class="h-16 bg-gray-800 flex justify-around items-center text-gray-400 shrink-0 w-full shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-40">
+        <div v-for="nav in compactNavs" :key="nav.key" 
+             @click="currentView = nav.subKeys ? nav.subKeys[0] : nav.key"
+             class="flex flex-col items-center justify-center cursor-pointer hover:text-white transition group relative h-full w-full"
+             :class="{'text-blue-400': nav.subKeys ? nav.subKeys.includes(currentView) : currentView === nav.key}">
+            <span class="text-xl mb-0.5">{{ nav.icon }}</span>
+            <span class="text-[10px]">{{ nav.label }}</span>
+            <div v-if="nav.subKeys ? nav.subKeys.includes(currentView) : currentView === nav.key" class="absolute top-0 left-0 right-0 h-1 bg-blue-400"></div>
+        </div>
+    </nav>
+    <div v-if="showHabitModal" class="fixed inset-0 bg-black/50 modal-bg flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-md modal-content" @click.stop>
+            <h3 class="text-xl font-bold mb-4">{{ modalMode==='create'?'新建习惯模板':'编辑习惯模板' }}</h3>
+            <label class="block mb-2 text-sm font-medium">名称</label>
+            <input type="text" v-model="editingHabit.name" class="w-full p-2 border rounded mb-4">
+            <label class="block mb-2 text-sm font-medium">类型</label>
+            <select v-model="editingHabit.type" class="w-full p-2 border rounded mb-4">
+                <option value="action">坚持型 (Action)</option>
+                <option value="abstinence">戒断型 (Abstinence)</option>
+            </select>
+            <label class="block mb-2 text-sm font-medium">描述</label>
+            <textarea v-model="editingHabit.desc" class="w-full p-2 border rounded mb-4"></textarea>
+            <label class="block mb-2 text-sm font-medium">默认开始时间 (仅用于坚持型)</label>
+            <input type="time" v-model="editingHabit.defaultTime" class="w-full p-2 border rounded mb-4" :disabled="editingHabit.type === 'abstinence'">
+
+            <hr class="my-4">
+            <h4 class="font-bold text-gray-700 mb-2">休息策略 (休息日不生成任务/不中断连击)</h4>
+            <label class="block mb-2 text-sm font-medium">休息周期 N (天)</label>
+            <input type="number" v-model.number="editingHabit.breakCycleN" min="1" class="w-full p-2 border rounded mb-4">
+            
+            <div v-if="editingHabit.breakCycleN === 7">
+                <label class="block mb-2 text-sm font-medium">周期内休息日 (基于周一到周日: 1=周一, 7=周日)</label>
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <label v-for="(dayName, index) in ['周一', '周二', '周三', '周四', '周五', '周六', '周日']" :key="index"
+                           class="flex items-center space-x-1 cursor-pointer">
+                        <input type="checkbox" :value="index + 1" v-model="editingHabit.breakDays" class="rounded text-purple-600 focus:ring-purple-500">
+                        <span class="text-sm">{{ dayName }}</span>
+                    </label>
+                </div>
+            </div>
+            <div v-else-if="editingHabit.breakCycleN > 0">
+                <label class="block mb-2 text-sm font-medium">休息日 (输入 1 到 {{ editingHabit.breakCycleN }} 之间的数字, 逗号分隔)</label>
+                <input type="text" 
+                       :value="editingHabit.breakDays.join(', ')"
+                       @input="editingHabit.breakDays = $event.target.value.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n > 0 && n <= editingHabit.breakCycleN)" 
+                       class="w-full p-2 border rounded mb-4"
+                       placeholder="如: 3, 7">
+            </div>
+            <div v-else class="text-sm text-gray-500 mb-4">
+                请输入有效的休息周期 (N)。
+            </div>
+            <div class="flex justify-end space-x-3 mt-6">
+                <button @click="showHabitModal=false" class="px-4 py-2 border rounded">取消</button>
+                <button @click="saveHabit" class="px-4 py-2 bg-purple-600 text-white rounded">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="showTaskModal" class="fixed inset-0 bg-black/50 modal-bg flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-lg modal-content" @click.stop>
+            <h3 class="text-xl font-bold mb-4">{{ modalMode==='create'?'新建任务':'编辑任务' }}</h3>
+            <label class="block mb-2 text-sm font-medium">标题</label>
+            <input type="text" v-model="editingTask.title" class="w-full p-2 border rounded mb-4">
+            <div class="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                    <label class="block mb-2 text-sm font-medium">类型</label>
+                    <select v-model="editingTask.type" class="w-full p-2 border rounded">
+                        <option value="工作">工作</option><option value="学习">学习</option><option value="生活">生活</option>
+                        <option value="习惯">习惯</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm font-medium">优先级</label>
+                    <select v-model="editingTask.priority" class="w-full p-2 border rounded">
+                        <option value="p1">P1 (紧急)</option><option value="p2">P2 (重要)</option>
+                        <option value="p3">P3 (日常)</option><option value="p4">P4 (待办)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm font-medium">计划日期</label>
+                    <input type="date" v-model="editingTask.plannedDate" class="w-full p-2 border rounded">
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                    <label class="block mb-2 text-sm font-medium">开始时间 (可选)</label>
+                    <input type="time" v-model="editingTask.startTime" class="w-full p-2 border rounded">
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm font-medium">持续时长 (分钟)</label>
+                    <input type="number" v-model.number="editingTask.duration" class="w-full p-2 border rounded">
+                </div>
+                <div class="flex items-center pt-8">
+                    </div>
+            </div>
+            <div v-if="editingTask.type === '学习' && !editingTask.preId" class="p-4 border rounded bg-yellow-50 mb-4">
+                <div class="flex items-center mb-2">
+                    <input type="checkbox" id="review" v-model="editingTask.isReviewTask" class="mr-2">
+                    <label for="review" class="text-sm font-bold">生成复习链表 (Spaced Repetition)</label>
+                </div>
+                <div v-if="editingTask.isReviewTask" class="mt-2">
+                    <label class="block mb-2 text-sm font-medium">复习策略 (逗号分隔天数，如 1, 3, 7)</label>
+                    <input type="text" v-model="editingTask.customIntervals" placeholder="留空使用默认: 1, 2, 4, 7, 15, 30" class="w-full p-2 border rounded">
+                    <p class="text-xs text-gray-500 mt-1">注意：保存后将生成一系列子任务。</p>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-3 mt-6">
+                <button @click="showTaskModal=false" class="px-4 py-2 border rounded">取消</button>
+                <button @click="saveTask" class="px-4 py-2 bg-blue-600 text-white rounded">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <div v-if="showProjectModal" class="fixed inset-0 bg-black/50 modal-bg flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-md modal-content" @click.stop>
+            <h3 class="text-xl font-bold mb-4">{{ modalMode==='create'?'新建项目':'编辑项目' }}</h3>
+            <label class="block mb-2 text-sm font-medium">项目名称</label>
+            <input type="text" v-model="editingProject.name" class="w-full p-2 border rounded mb-4">
+            <div class="flex justify-end space-x-3 mt-6">
+                <button @click="showProjectModal=false" class="px-4 py-2 border rounded">取消</button>
+                <button @click="saveProject" class="px-4 py-2 bg-indigo-600 text-white rounded">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="showMilestoneModal" class="fixed inset-0 bg-black/50 modal-bg flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-md modal-content" @click.stop>
+            <h3 class="text-xl font-bold mb-4">新增里程碑到: {{ currentProject.name }}</h3>
+            <label class="block mb-2 text-sm font-medium">里程碑名称</label>
+            <input type="text" v-model="editingMilestone.name" class="w-full p-2 border rounded mb-4">
+            <div class="flex justify-end space-x-3 mt-6">
+                <button @click="showMilestoneModal=false" class="px-4 py-2 border rounded">取消</button>
+                <button @click="saveMilestone" class="px-4 py-2 bg-indigo-600 text-white rounded">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <div v-if="showMilestoneContentModal" class="fixed inset-0 bg-black/50 modal-bg flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-md modal-content" @click.stop>
+            <h3 class="text-xl font-bold mb-4">关联任务/习惯到: {{ currentProject.name }} - {{ currentMilestone.name }}</h3>
+            
+            <div class="flex space-x-4 border-b mb-4">
+                <button @click="milestoneTab='task'" 
+                        :class="{'border-b-2 border-blue-500 text-blue-600 font-bold': milestoneTab==='task'}"
+                        class="pb-1 text-sm text-gray-600 hover:text-blue-600 transition">
+                    关联任务
+                </button>
+                <button @click="milestoneTab='habit'" 
+                        :class="{'border-b-2 border-blue-500 text-blue-600 font-bold': milestoneTab==='habit'}"
+                        class="pb-1 text-sm text-gray-600 hover:text-blue-600 transition">
+                    关联习惯
+                </button>
+            </div>
+            
+            <div class="h-80 overflow-y-auto space-y-2">
+                <div v-if="milestoneTab==='task'">
+                    <div v-for="task in allTasks" :key="task.id" class="flex justify-between items-center p-2 border rounded hover:bg-gray-50">
+                        <span class="text-sm truncate">{{ task.title }}</span>
+                        <button @click="addToMilestone('task', task.id)" 
+                                :disabled="isItemInMilestone(currentMilestone, task.id)"
+                                class="text-xs px-2 py-1 rounded" 
+                                :class="isItemInMilestone(currentMilestone, task.id)?'bg-gray-200 text-gray-500':'bg-blue-500 text-white hover:bg-blue-600'">
+                            {{ isItemInMilestone(currentMilestone, task.id)?'已关联':'关联' }}
+                        </button>
+                    </div>
+                </div>
+                <div v-if="milestoneTab==='habit'">
+                    <div v-for="habit in habits" :key="habit.id" class="flex justify-between items-center p-2 border rounded hover:bg-gray-50">
+                        <span class="text-sm truncate">{{ habit.name }}</span>
+                        <button @click="addToMilestone('habit', habit.id)" 
+                                :disabled="isItemInMilestone(currentMilestone, habit.id)"
+                                class="text-xs px-2 py-1 rounded" 
+                                :class="isItemInMilestone(currentMilestone, habit.id)?'bg-gray-200 text-gray-500':'bg-blue-500 text-white hover:bg-blue-600'">
+                            {{ isItemInMilestone(currentMilestone, habit.id)?'已关联':'关联' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex justify-end space-x-3 mt-6">
+                <button @click="showMilestoneContentModal=false" class="px-4 py-2 border rounded">关闭</button>
+            </div>
+        </div>
+    </div>
+
+
+</div>
+
+<script>
+    const { ref, computed, watch, onMounted } = Vue;
+    const generateUniqueId = (prefix = 'id_') => {
+        return prefix + Date.now().toString(36) + Math.random().toString(36).substring(2);
+    };
+
+    const getPriorityColor = (priority) => {
+        switch (priority) {
+            case 'p1': return 'bg-red-500';
+            case 'p2': return 'bg-yellow-500';
+            case 'p3': return 'bg-blue-500';
+            case 'p4': return 'bg-gray-500';
+            default: return 'bg-gray-400';
+        }
+    };
+    const getPriorityBorderColor = (priority) => {
+        switch (priority) {
+            case 'p1': return 'border-l-red-500';
+            case 'p2': return 'border-l-yellow-500';
+            case 'p3': return 'border-l-blue-500';
+            case 'p4': return 'border-l-gray-500';
+            default: return 'border-l-gray-400';
+        }
+    };
+    const getPriorityLabel = (priority) => {
+        switch (priority) {
+            case 'p1': return 'P1 (紧急)';
+            case 'p2': return 'P2 (重要)';
+            case 'p3': return 'P3 (日常)';
+            case 'p4': return 'P4 (待办)';
+            default: return '未知';
+        }
+    };
+    
+    const getTaskEnd = (task) => {
+        if (!task.startTime || !task.duration) return null;
+        const start = dayjs(task.plannedDate + ' ' + task.startTime);
+        return start.add(task.duration, 'minute');
+    };
+    
+    // --- Vue App Setup ---
+    Vue.createApp({
+        setup() {
+            // --- 状态与数据定义 ---
+            const currentView = ref('day'); 
+            const tasks = ref([]); 
+            const habits = ref([]);
+            const projects = ref([]);
+            
+            const appSettings = {
+                defaultReviewIntervals: [1, 2, 4, 7, 15, 30] // 默认复习间隔（天）
+            };
+
+            // 日历/时间相关
+            const todayDate = dayjs().format('YYYY-MM-DD');
+            const selectedDate = ref(todayDate);
+            const selectedWeekStart = ref(dayjs().weekday(0).format('YYYY-MM-DD')); // 周一
+            const selectedMonthStart = ref(dayjs().startOf('month').format('YYYY-MM-DD'));
+            
+            // 统计视图状态
+            const statsWeekStart = ref(dayjs().weekday(0).format('YYYY-MM-DD'));
+            const statsMonthStart = ref(dayjs().startOf('month').format('YYYY-MM-DD'));
+
+            // 任务拖拽相关
+            const draggedTask = ref(null);
+            const dragMode = ref(null); // 'move'
+            
+            // 模态框相关
+            const showHabitModal = ref(false);
+            const showTaskModal = ref(false);
+            const showProjectModal = ref(false);
+            const showMilestoneModal = ref(false);
+            const showMilestoneContentModal = ref(false);
+
+            const modalMode = ref('create'); // 'create' or 'edit'
+            const editingHabit = ref({});
+            const editingTask = ref({});
+            const editingProject = ref({});
+            const editingMilestone = ref({});
+            const originalEditingTask = ref(null); // 用于复习链表时间修改的判断
+            
+            // 项目/里程碑关联
+            const currentProject = ref(null);
+            const currentMilestone = ref(null);
+            const milestoneTab = ref('task'); // 'task' or 'habit'
+
+            // 日视图优先级筛选
+            const selectedPriorityFilter = ref('all'); 
+            
+            const shortTermFilterStatus = ref('all'); // 'all', 'completed', 'uncompleted'
+            const shortTermFilterPriority = ref('all'); // 'all', 'p1', 'p2', 'p3', 'p4'
+            const shortTermFilterStartDate = ref(''); // YYYY-MM-DD
+            const shortTermFilterEndDate = ref('');   // YYYY-MM-DD
+
+            const fileInput = ref(null);
+
+            const compactNavs = [
+                { key: 'schedule', label: '日程', icon: '🏠', subKeys: ['day', 'schedule', 'month'] },
+                { key: 'short_term', label: '任务', icon: '📝' },
+                { key: 'habit', label: '习惯', icon: '✨' },
+                { key: 'project', label: '项目', icon: '🏗' },
+                { key: 'stats', label: '统计', icon: '📊' }
+            ];
+
+            const saveData = () => {
+                localStorage.setItem('lifeOsPro_v2', JSON.stringify({ tasks: tasks.value, habits: habits.value, projects: projects.value, appSettings }));
+            };
+            
+            const loadData = () => {
+                const raw = localStorage.getItem('lifeOsPro_v2');
+                if(raw) {
+                    const d = JSON.parse(raw);
+                    tasks.value = d.tasks || [];
+                    habits.value = d.habits || [];
+                    projects.value = d.projects || [];
+                    Object.assign(appSettings, d.appSettings);
+                }
+                // 确保数据结构兼容 childIds, preId, 以及新增的习惯属性
+                tasks.value.forEach(t => {
+                    if (!t.childIds) t.childIds = [];
+                    if (!t.preId) t.preId = null;
+                });
+                habits.value.forEach(h => {
+                    if (h.breakCycleN === undefined) h.breakCycleN = 7;
+                    if (h.breakDays === undefined) h.breakDays = [];
+                    if (!h.dateRange) h.dateRange = { start: todayDate, end: dayjs().add(1,'year').format('YYYY-MM-DD') };
+                });
+                // 确保项目中的里程碑内容数组存在，防止渲染时出现 'length' undefined 错误
+                projects.value.forEach(p => {
+                    if (!p.milestones) p.milestones = [];
+                    p.milestones.forEach(ms => {
+                        if (!ms.contents) {
+                            ms.contents = [];
+                        }
+                    });
+                });
+            };
+
+            const checkDailyHabitGeneration = (forceToday = false) => {
+                const today = dayjs().format('YYYY-MM-DD');
+                const lastCheckDate = localStorage.getItem('lastHabitCheckDate');
+
+                if (lastCheckDate === today && !forceToday) return;
+
+                habits.value.forEach(h => {
+                    if (h.type === 'action' && h.defaultTime && h.duration > 0 && h.active) {
+                        const existingTask = tasks.value.some(t => t.plannedDate === today && t.habitId === h.id && t.isGeneratedFromHabit );
+                        if (existingTask) return; // 已生成，跳过
+                        if (isTodayARestDay(h)) {
+                            console.log(`[Habit Gen] ${h.name} is a rest day. No task generated.`);
+                            return;
+                        }
+                        tasks.value.push({
+                            id: generateUniqueId('t_'),
+                            title: `[每日] ${h.name}`,
+                            type: '习惯',
+                            priority: 'p3',
+                            plannedDate: today,
+                            startTime: h.defaultTime,
+                            duration: h.duration,
+                            status: '未开始',
+                            habitId: h.id, // 关联 ID
+                            isGeneratedFromHabit: true,
+                            childIds: [],
+                            preId: null,
+                            hasConflict: false
+                        });
+                    }
+                });
+                localStorage.setItem('lastHabitCheckDate', today);
+            };
+
+
+            onMounted(() => {
+                loadData();
+                checkDailyHabitGeneration();
+            });
+
+            watch([tasks, habits, projects], saveData, { deep: true });
+
+            // --- 导入/导出 ---
+            const exportData = () => {
+                const data = JSON.stringify({ tasks: tasks.value, habits: habits.value, projects: projects.value, appSettings }, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `LifeOS_Pro_backup_${dayjs().format('YYYYMMDD')}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                alert('数据已导出！');
+            };
+            const triggerImport = () => {
+                fileInput.value.click();
+            };
+            const handleImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (res) => {
+                    try {
+                        const importedData = JSON.parse(res.target.result);
+                        if (confirm("确定导入数据吗？这将覆盖当前所有数据！")) {
+                            tasks.value = importedData.tasks || [];
+                            habits.value = importedData.habits || [];
+                            projects.value = importedData.projects || [];
+                            Object.assign(appSettings, importedData.appSettings || {});
+                            // 导入后重新检查习惯生成（防止丢失当天的）
+                            checkDailyHabitGeneration(true); 
+                            saveData();
+                            alert("数据导入成功！");
+                        }
+                    } catch (error) {
+                        alert("数据导入失败，文件格式不正确！");
+                        console.error("Import error:", error);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- 日期/周视图计算 ---
+            const getWeekDay = (date) => dayjs(date).format('dddd');
+            const changeDate = (off) => {
+                selectedDate.value = dayjs(selectedDate.value).add(off, 'day').format('YYYY-MM-DD');
+            };
+            const changeWeek = (off) => {
+                selectedWeekStart.value = dayjs(selectedWeekStart.value).add(off, 'week').weekday(0).format('YYYY-MM-DD');
+            };
+            const goToTodayWeek = () => {
+                selectedWeekStart.value = dayjs().weekday(0).format('YYYY-MM-DD');
+            };
+            const weekDays = computed(() => {
+                const start = dayjs(selectedWeekStart.value);
+                const days = [];
+                for (let i = 0; i < 7; i++) {
+                    const date = start.add(i, 'day').format('YYYY-MM-DD');
+                    days.push({
+                        date: date,
+                        dayName: getWeekDay(date),
+                        dayIndex: i 
+                    });
+                }
+                return days;
+            });
+
+            // --- 任务排程 (时间冲突检测、当日任务列表) ---
+            const checkTaskConflict = (task, allTasksInDay) => {
+                if (!task.startTime || !task.duration || task.status === '已完成') return false;
+                
+                const taskStart = dayjs(task.plannedDate + ' ' + task.startTime);
+                const taskEnd = getTaskEnd(task);
+                
+                return allTasksInDay.some(other => {
+                    if (other.id === task.id || other.status === '已完成') return false;
+                    
+                    const otherStart = other.startTime ? dayjs(other.plannedDate + ' ' + other.startTime) : null;
+                    const otherEnd = getTaskEnd(other);
+
+                    if (!otherStart || !otherEnd) return false; // 只检查有时间的任务
+
+                    // 冲突检测：(TaskA开始时间 < TaskB结束时间) AND (TaskB开始时间 < TaskA结束时间)
+                    return taskStart.isBefore(otherEnd) && otherStart.isBefore(taskEnd);
+                });
+            };
+
+            const dayTasks = computed(() => {
+                let list = tasks.value
+                    .filter(t => t.plannedDate === selectedDate.value);
+                    
+                if (selectedPriorityFilter.value !== 'all') {
+                    list = list.filter(t => t.priority === selectedPriorityFilter.value);
+                }
+
+                list = list.sort((a, b) => {
+                    const aHasTime = a.startTime && a.duration > 0;
+                    const bHasTime = b.startTime && b.duration > 0;
+
+                    if (aHasTime && !bHasTime) return -1;
+                    if (!aHasTime && bHasTime) return 1;
+                    
+                    if (aHasTime && bHasTime) {
+                        const timeA = a.startTime;
+                        const timeB = b.startTime;
+                        if (timeA < timeB) return -1;
+                        if (timeA > timeB) return 1;
+                    }
+                    const priorityOrder = { 'p1': 1, 'p2': 2, 'p3': 3, 'p4': 4 };
+                    return priorityOrder[a.priority] - priorityOrder[b.priority];
+                });
+                list.forEach(task => {
+                    task.hasConflict = checkTaskConflict(task, list);
+                });
+
+                return list;
+            });
+
+            const tasksForWeek = computed(() => {
+                const start = dayjs(selectedWeekStart.value);
+                const end = start.add(6, 'day').format('YYYY-MM-DD');
+                const tasksByDay = {};
+
+                tasks.value.forEach(t => {
+                    if (dayjs(t.plannedDate).isBetween(start, dayjs(end), 'day', '[]')) {
+                        if (!tasksByDay[t.plannedDate]) {
+                            tasksByDay[t.plannedDate] = [];
+                        }
+                        // 确保只包含有时间的任务 (或包含所有任务但只渲染有时间的)
+                        tasksByDay[t.plannedDate].push(t);
+                    }
+                });
+
+                // 在这里可以进行每周的任务冲突检查，但为简化，沿用日视图的逻辑。
+                return tasksByDay;
+            });
+            
+            // 计算任务在周/日视图中的位置和高度
+            const getTaskPosition = (task, isWeekView = false) => {
+                if (!task.startTime || !task.duration) return {};
+                const [h, m] = task.startTime.split(':').map(Number);
+                
+                // 转换为分钟总数
+                const startMinutes = h * 60 + m;
+                const durationMinutes = task.duration;
+
+                // 一小时 60px
+                const top = (startMinutes / 60) * 60 + (isWeekView ? 0 : 0); // 1分钟 1px
+                
+                // 高度
+                const height = (durationMinutes / 60) * 60;
+                
+                return {
+                    top: `${top}px`,
+                    height: `${height}px`,
+                    position: 'absolute'
+                };
+            };
+
+            // --- 月视图逻辑 ---
+            const changeMonth = (off) => {
+                selectedMonthStart.value = dayjs(selectedMonthStart.value).add(off, 'month').startOf('month').format('YYYY-MM-DD');
+            };
+            const goToTodayMonth = () => {
+                selectedMonthStart.value = dayjs().startOf('month').format('YYYY-MM-DD');
+            };
+            const goToDay = (date) => {
+                selectedDate.value = date;
+                currentView.value = 'day';
+            };
+            
+            const monthCalendar = computed(() => {
+                const startOfMonth = dayjs(selectedMonthStart.value);
+                // 找出当月第一天所在周的周一
+                let startDay = startOfMonth.weekday(0);
+
+                const days = [];
+                let currentDay = startDay;
+                
+                // 任务/习惯数据准备
+                const tasksByDate = tasks.value.reduce((acc, t) => {
+                    acc[t.plannedDate] = acc[t.plannedDate] || [];
+                    acc[t.plannedDate].push(t);
+                    return acc;
+                }, {});
+
+                const habitHistoryByDate = habits.value.flatMap(h => h.stats.history).reduce((acc, h) => {
+                    acc[h.date] = acc[h.date] || [];
+                    acc[h.date].push(h);
+                    return acc;
+                }, {});
+
+
+                // 生成日历
+                while (currentDay.isBefore(startOfMonth.add(1, 'month').weekday(7))) {
+                    const date = currentDay.format('YYYY-MM-DD');
+                    const isCurrentMonth = currentDay.month() === startOfMonth.month();
+                    
+                    const dayTasks = tasksByDate[date] || [];
+                    const habitTasks = dayTasks.filter(t => t.isGeneratedFromHabit);
+
+                    let habitDoneCount = 0;
+                    if (habitTasks.length > 0) {
+                        habitDoneCount = habitTasks.filter(t => t.status === '已完成').length;
+                    } else {
+                         // 检查戒断型习惯的休息日或失败记录
+                         const applicableHabits = habits.value.filter(h => dayjs(date).isBetween(dayjs(h.dateRange.start), dayjs(h.dateRange.end), 'day', '[]'));
+                         // 对于非任务生成的习惯，检查是否是休息日
+                         applicableHabits.forEach(h => {
+                             if (isDateARestDay(h, date)) {
+                                 habitDoneCount++;
+                             } else if (h.type === 'abstinence') {
+                                 // 戒断型，如果当天没有失败记录，则认为完成
+                                 const isFail = h.stats.history.some(hist => hist.date === date && hist.status === 'fail');
+                                 if (!isFail) {
+                                     habitDoneCount++;
+                                 }
+                             }
+                         });
+                    }
+                    
+                    days.push({
+                        date,
+                        isCurrentMonth,
+                        count: dayTasks.length,
+                        taskCount: dayTasks.filter(t => !t.isGeneratedFromHabit).length,
+                        habitCount: habitTasks.length,
+                        habitDone: habitDoneCount
+                    });
+                    
+                    currentDay = currentDay.add(1, 'day');
+                }
+
+                // 确保至少有 6 周 (42天) 保证排版稳定
+                while (days.length < 42) {
+                    const date = currentDay.format('YYYY-MM-DD');
+                    days.push({
+                        date,
+                        isCurrentMonth: false,
+                        count: 0,
+                        taskCount: 0,
+                        habitCount: 0,
+                        habitDone: 0
+                    });
+                    currentDay = currentDay.add(1, 'day');
+                }
+                
+                return days;
+            });
+
+            // --- 拖拽逻辑 ---
+            const dragStart = (id, index) => {
+                draggedTask.value = id;
+                dragMode.value = 'move';
+            };
+            
+            // 拖拽放下：执行交换并处理时间交换
+            const dropTask = (targetId, targetIndex) => {
+                event.target.closest('div.task-item').classList.remove('opacity-50');
+                if (draggedTask.value === targetId) return; // 拖到自身
+
+                const tasksToReorder = dayTasks.value.slice(); // 复制当日任务列表（Computed）
+                const taskToMove = tasksToReorder.find(t => t.id === draggedTask.value);
+                const targetTask = tasksToReorder[targetIndex];
+                
+                if (!taskToMove || !targetTask) return;
+                const taskToMoveRef = tasks.value.find(t => t.id === taskToMove.id);
+                const targetTaskRef = tasks.value.find(t => t.id === targetTask.id);
+
+                if (!taskToMoveRef || !targetTaskRef) return;
+
+                const tempTime = taskToMoveRef.startTime;
+                const tempDuration = taskToMoveRef.duration;
+
+                taskToMoveRef.startTime = targetTaskRef.startTime;
+                taskToMoveRef.duration = targetTaskRef.duration;
+
+                targetTaskRef.startTime = tempTime;
+                targetTaskRef.duration = tempDuration;
+                
+                if (taskToMoveRef.preId === null && taskToMoveRef.childIds.length > 0) {
+                    const confirmUpdateA = confirm(
+                        `任务 [${taskToMoveRef.title}] 是复习链表父节点，时间已被交换为 ${taskToMoveRef.startTime} / ${taskToMoveRef.duration}m。\n` +
+                        `是否将新的时间/时长传导给后续 ${taskToMoveRef.childIds.length} 个子任务？`
+                    );
+                    if (confirmUpdateA) {
+                         updateChildTasks(
+                            taskToMoveRef.id, 
+                            taskToMoveRef.plannedDate, 
+                            taskToMoveRef.startTime, 
+                            taskToMoveRef.duration
+                         );
+                    }
+                }
+
+                if (targetTaskRef.preId === null && targetTaskRef.childIds.length > 0) {
+                    const confirmUpdateB = confirm(
+                        `任务 [${targetTaskRef.title}] 是复习链表父节点，时间已被交换为 ${targetTaskRef.startTime} / ${targetTaskRef.duration}m。\n` +
+                        `是否将新的时间/时长传导给后续 ${targetTaskRef.childIds.length} 个子任务？`
+                    );
+                    if (confirmUpdateB) {
+                         updateChildTasks(
+                            targetTaskRef.id, 
+                            targetTaskRef.plannedDate, 
+                            targetTaskRef.startTime, 
+                            targetTaskRef.duration
+                         );
+                    }
+                }
+            };
+
+            // --- 任务 CRUD ---
+            const openTaskModal = (mode, task, plannedDate = null) => {
+                modalMode.value = mode;
+                if(mode==='create') {
+                    editingTask.value = { 
+                        id: generateUniqueId('t_'), 
+                        title: '', 
+                        type: '工作', 
+                        priority: 'p3', 
+                        plannedDate: plannedDate || todayDate, 
+                        startTime: '', 
+                        duration: 60, 
+                        status: '未开始',
+                        isReviewTask: false,
+                        customIntervals: '',
+                        preId: null,
+                        childIds: [],
+                        hasConflict: false,
+                        habitId: null, 
+                        isGeneratedFromHabit: false 
+                    };
+                } else {
+                    editingTask.value = JSON.parse(JSON.stringify(task)); // 记录原始值用于保存时的变化检查
+                    originalEditingTask.value = JSON.parse(JSON.stringify(task));
+                    editingTask.value.isReviewTask = editingTask.value.childIds.length > 0;
+                    editingTask.value.customIntervals = ''; // 编辑时不显示复习间隔
+                }
+                showTaskModal.value = true;
+            };
+            
+            /**
+             * 递归更新子任务的时间/时长
+             * @param {string} parentId 当前更新的父节点ID
+             * @param {string} basePlannedDate 前一个节点的新计划日期
+             * @param {string} baseStartTime 前一个节点的新开始时间
+             * @param {number} baseDuration 前一个节点的新持续时长
+             */
+            const updateChildTasks = (parentId, basePlannedDate, baseStartTime, baseDuration) => {
+                const parentTask = tasks.value.find(t => t.id === parentId);
+                if (!parentTask || parentTask.childIds.length === 0) return;
+
+                // 如果 `parentId` 是链表的**头节点** (即 `parentTask.preId === null`)
+                if (parentTask.preId === null) {
+                    const chainHeadTask = parentTask;
+                    let nextId = chainHeadTask.childIds[0];
+                    let currentTask = chainHeadTask;
+
+                    let currentRef = currentTask;
+                    while(nextId) {
+                        const nextTask = tasks.value.find(t => t.id === nextId);
+                        if (nextTask) {
+                            nextTask.startTime = baseStartTime;
+                            nextTask.duration = baseDuration;
+                            currentRef = nextTask;
+                            nextId = nextTask.childIds[0];
+                        } else {
+                            nextId = null; 
+                        }
+                    }
+                } else {
+                    // 如果传入的 `parentId` 是链表的中间节点，则只更新其后的任务
+                    let nextId = parentTask.childIds[0];
+                    while(nextId) {
+                        const nextTask = tasks.value.find(t => t.id === nextId);
+                        if (nextTask) {
+                            nextTask.startTime = baseStartTime;
+                            nextTask.duration = baseDuration;
+                            nextId = nextTask.childIds[0];
+                        } else {
+                            nextId = null;
+                        }
+                    }
+                }
+            };
+            
+            const saveTask = () => {
+                if (!editingTask.value.title) {
+                    alert('任务标题不能为空');
+                    return;
+                }
+                
+                const isNew = modalMode.value === 'create';
+                const taskData = editingTask.value;
+
+                if(isNew) {
+                    tasks.value.push(taskData);
+                    
+                    // 处理复习链表生成
+                    if (taskData.isReviewTask && taskData.type === '学习') {
+                        let intervals = appSettings.defaultReviewIntervals;
+                        if (taskData.customIntervals) {
+                            intervals = taskData.customIntervals.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n > 0);
+                        }
+                        
+                        let prevId = taskData.id;
+                        let currentTask = taskData;
+                        
+                        intervals.forEach(dayOff => {
+                            const nextDate = dayjs(currentTask.plannedDate).add(dayOff, 'day').format('YYYY-MM-DD');
+                            const subId = generateUniqueId('t_');
+                            
+                            const subTask = {
+                                ...currentTask,
+                                id: subId,
+                                title: `(复习+${dayOff}d) ${currentTask.title}`,
+                                plannedDate: nextDate, // 日期偏移
+                                status: '未开始',
+                                isReviewTask: false,
+                                preId: prevId, // 指向上一个节点
+                                childIds: []
+                            };
+                            tasks.value.push(subTask);
+
+                            // 更新上一个节点的 childIds
+                            const prevTask = tasks.value.find(t => t.id === prevId);
+                            if (prevTask) {
+                                prevTask.childIds.push(subId);
+                            }
+                            prevId = subId;
+                        });
+                    }
+                } else {
+                    // 编辑任务
+                    const index = tasks.value.findIndex(t => t.id === taskData.id);
+                    if (index !== -1) {
+                        // 如果修改了有复习链表的任务的时间/时长，提示更新子任务
+                        const originalTask = originalEditingTask.value;
+                        const timeChanged = originalTask.startTime !== taskData.startTime || originalTask.duration !== taskData.duration;
+                        
+                        // 如果是父节点且时间发生变化，进行提示
+                        if (timeChanged && taskData.childIds && taskData.childIds.length > 0 && taskData.preId === null) {
+                            const confirmUpdate = confirm(
+                                `任务 [${taskData.title}] 是复习链表父节点。\n` +
+                                `时间或时长已被修改为 ${taskData.startTime || '无时间'} / ${taskData.duration || 0}m。\n` +
+                                `是否将新的时间/时长传导给后续 ${taskData.childIds.length} 个子任务？`
+                            );
+                            if (confirmUpdate) {
+                                 updateChildTasks(
+                                    taskData.id, 
+                                    taskData.plannedDate, 
+                                    taskData.startTime, 
+                                    taskData.duration
+                                 );
+                            }
+                        }
+                        
+                        tasks.value[index] = taskData;
+                    }
+                }
+                
+                showTaskModal.value = false;
+            };
+
+            const allTasks = computed(() => tasks.value);
+
+            const deleteTask = (id) => {
+    const taskIndex = tasks.value.findIndex(t => t.id === id);
+    if (taskIndex === -1) return;
+
+    const taskToDelete = tasks.value[taskIndex];
+
+    if (taskToDelete.preId === null && taskToDelete.childIds.length > 0) {
+        if (!confirm(`任务 [${taskToDelete.title}] 是复习父节点，确认删除它吗？`)) {
+            return; 
+        }
+        tasks.value.splice(taskIndex, 1);
+        
+        if (taskToDelete.childIds.length > 0) {
+            if (confirm(`任务 [${taskToDelete.title}] 已被删除。\n` + 
+                        `是否同时删除其后续 ${taskToDelete.childIds.length} 个子任务链表？`)) {
+                // YES: 删除所有子任务
+                let currentId = taskToDelete.childIds[0];
+                // 使用 while 循环删除所有子节点
+                while(currentId) {
+                    const currentIndex = tasks.value.findIndex(t => t.id === currentId); 
+                    if (currentIndex !== -1) {
+                        const currentTask = tasks.value[currentIndex];
+                        tasks.value.splice(currentIndex, 1); // 删除当前子任务
+                        currentId = currentTask.childIds.length > 0 ? currentTask.childIds[0] : null; // 获取下一个 ID
+                    } else {
+                        currentId = null;
+                    }
+                }
+            } else {
+                // NO: 保留子任务，断开链条 (第一个子任务的 preId 置空)
+                const firstChildId = taskToDelete.childIds[0];
+                const firstChild = tasks.value.find(t => t.id === firstChildId);
+                if (firstChild) {
+                    firstChild.preId = null; // 将第一个子节点的 preId 置空，使其成为新的独立任务
+                }
+            }
+        }
+        return; 
+    } 
+    else {
+        if (!confirm(`确认删除任务 [${taskToDelete.title}] 吗？`)) {
+            return; 
+        }
+        
+        if (taskToDelete.preId) {
+            // 子节点：维护链条
+            const prevTask = tasks.value.find(t => t.id === taskToDelete.preId);
+            const nextTask = taskToDelete.childIds.length > 0 ? tasks.value.find(t => t.id === taskToDelete.childIds[0]) : null;
+            
+            if (prevTask) {
+                prevTask.childIds = taskToDelete.childIds; 
+            }
+            if (nextTask) {
+                nextTask.preId = taskToDelete.preId; 
+            }
+        } 
+        
+        // 移除当前任务（子节点或普通任务）
+        tasks.value.splice(taskIndex, 1);
+    }
+};
+            
+            const toggleTaskStatus = (task) => {
+                // 如果是习惯生成的任务，完成任务的同时更新习惯连击
+                if (task.isGeneratedFromHabit) {
+                    const habit = habits.value.find(h => h.id === task.habitId);
+                    if (habit) {
+                         // 只有当状态从 '未完成' -> '已完成' 时才触发成功打卡逻辑
+                        if (task.status !== '已完成') {
+                            task.status = '已完成';
+                            updateHabitStreak(habit, 'success');
+                        } else {
+                            // 从 '已完成' -> '未完成'
+                            task.status = '未开始';
+                            // 理论上应该回滚连击，但逻辑复杂，这里简化不回滚，只更新状态
+                        }
+                        return;
+                    }
+                }
+                
+                // 普通任务
+                task.status = task.status === '已完成' ? '未开始' : '已完成';
+
+                // 如果是复习链表的父节点，且完成了，提示完成子节点 (可选)
+                if (task.status === '已完成' && task.preId === null && task.childIds.length > 0) {
+                    if (confirm(`任务 [${task.title}] 是复习父节点，是否一并完成所有 ${task.childIds.length} 个子任务？`)) {
+                        let nextId = task.childIds[0];
+                        while(nextId) {
+                            const nextTask = tasks.value.find(t => t.id === nextId);
+                            if(nextTask) {
+                                nextTask.status = '已完成';
+                                nextId = nextTask.childIds[0];
+                            } else {
+                                nextId = null;
+                            }
+                        }
+                    }
+                }
+            };
+
+            // 过滤短期任务 (short_term)
+            const filteredShortTasks = computed(() => {
+                // 排除习惯生成的任务
+                let list = tasks.value.filter(t => t.isGeneratedFromHabit !== true); 
+                
+                if (shortTermFilterStatus.value === 'completed') {
+                    list = list.filter(t => t.status === '已完成');
+                } else if (shortTermFilterStatus.value === 'uncompleted') {
+                    list = list.filter(t => t.status !== '已完成');
+                }
+                
+                if (shortTermFilterPriority.value !== 'all') {
+                    list = list.filter(t => t.priority === shortTermFilterPriority.value);
+                }
+                const startDate = shortTermFilterStartDate.value;
+                const endDate = shortTermFilterEndDate.value;
+
+                if (startDate) {
+                    list = list.filter(t => dayjs(t.plannedDate).isSameOrAfter(dayjs(startDate)));
+                }
+                if (endDate) {
+                    list = list.filter(t => dayjs(t.plannedDate).isSameOrBefore(dayjs(endDate)));
+                }
+                return list.sort((a, b) => {
+                    // 未完成优先
+                    if (a.status !== '已完成' && b.status === '已完成') return -1;
+                    if (a.status === '已完成' && b.status !== '已完成') return 1;
+
+                    // 计划日期早的优先
+                    if (dayjs(a.plannedDate).isBefore(dayjs(b.plannedDate))) return -1;
+                    if (dayjs(a.plannedDate).isAfter(dayjs(b.plannedDate))) return 1;
+
+                    // 优先级高的优先
+                    const priorityOrder = { 'p1': 1, 'p2': 2, 'p3': 3, 'p4': 4 };
+                    return priorityOrder[a.priority] - priorityOrder[b.priority];
+                });
+            });
+
+            // --- 习惯逻辑 ---
+            const isDateARestDay = (habit, dateString) => {
+                 const { breakCycleN, breakDays } = habit;
+                 if (!breakCycleN || breakDays.length === 0) return false;
+
+                 const startDate = dayjs(habit.dateRange.start);
+                 const targetDate = dayjs(dateString);
+                 
+                 // 如果目标日期早于开始日期，不算休息日（因为任务也不会生成）
+                 if (targetDate.isBefore(startDate)) return false; 
+
+                 // 计算是第几天
+                 const diffInDays = targetDate.diff(startDate, 'day');
+                 const cycleN = parseInt(breakCycleN);
+                 
+                 // 周期内的第几天 (1 到 N)
+                 const dayInCycle = (diffInDays % cycleN) + 1; 
+
+                 return breakDays.includes(dayInCycle);
+            }
+            
+            const isTodayARestDay = (habit) => {
+                const today = dayjs().format('YYYY-MM-DD');
+                return isDateARestDay(habit, today);
+            };
+
+            const isHabitDoneToday = (habit) => {
+                const today = dayjs().format('YYYY-MM-DD');
+                
+                // 如果今天是休息日，则认为该习惯完成了休息（不中断连击）
+                if (isTodayARestDay(habit)) {
+                    return true;
+                }
+
+                if (habit.type === 'action') {
+                    // 坚持型：检查生成的任务是否已完成
+                    const dailyTask = tasks.value.find(t => t.plannedDate === today && t.habitId === habit.id && t.isGeneratedFromHabit);
+                    return dailyTask && dailyTask.status === '已完成';
+                } else if (habit.type === 'abstinence') {
+                    // 戒断型：检查历史记录中是否有今天的失败记录
+                    return habit.stats.history.some(h => h.date === today && h.status === 'fail') === false; // 没有失败记录即为完成
+                }
+                return false;
+            };
+
+            const checkInHabit = (habit) => {
+                const today = dayjs().format('YYYY-MM-DD');
+                
+                // 休息日不能打卡
+                if (isTodayARestDay(habit)) {
+                    alert('今天是休息日，无需打卡！');
+                    return;
+                }
+                
+                if (habit.type === 'action') {
+                    // 坚持型：找到并完成任务
+                    const dailyTask = tasks.value.find(t => t.plannedDate === today && t.habitId === habit.id && t.isGeneratedFromHabit);
+                    if (dailyTask) {
+                        dailyTask.status = '已完成';
+                         // 更新习惯连击
+                        updateHabitStreak(habit, 'success');
+                    } else {
+                        // 理论上 checkDailyHabitGeneration 已经运行，这里作为兜底
+                        alert('⚠️ 任务不存在，已自动生成并完成。'); 
+                        checkDailyHabitGeneration(true); // 立即生成今天的任务
+                        const newTask = tasks.value.find(t => t.plannedDate === today && t.habitId === habit.id && t.isGeneratedFromHabit);
+                        if (newTask) {
+                            newTask.status = '已完成';
+                            updateHabitStreak(habit, 'success');
+                        }
+                    }
+                } else if (habit.type === 'abstinence') {
+                    // 戒断型：记录失败（即打卡）
+                    if (!confirm(`确定记录 [${habit.name}] 今天失败了吗? (这将中断您的连击)`)) return;
+                    habit.stats.history.push({ date: today, status: 'fail' });
+                    updateHabitStreak(habit, 'fail');
+                }
+            };
+
+            const updateHabitStreak = (habit, status) => {
+                const today = dayjs().format('YYYY-MM-DD');
+                
+                // 如果是坚持型且成功，或者戒断型且没有失败（即通过 isHabitDoneToday 判定）
+                if (status === 'success' && habit.type === 'action') {
+                    let previousDate = dayjs(today).subtract(1, 'day');
+                    let isContinuous = false;
+                    while(previousDate.isSameOrAfter(dayjs(habit.dateRange.start))) {
+                        const prevDate = previousDate.format('YYYY-MM-DD');
+
+                        // 休息日算连续
+                        if (isDateARestDay(habit, prevDate)) {
+                            isContinuous = true;
+                            previousDate = previousDate.subtract(1, 'day');
+                            continue;
+                        }
+                        
+                        // 检查前一天的任务是否完成
+                        const prevTask = tasks.value.find(t => t.plannedDate === prevDate && t.habitId === habit.id && t.isGeneratedFromHabit);
+                        if (prevTask && prevTask.status === '已完成') {
+                            isContinuous = true;
+                            break; 
+                        }
+                        
+                        // 如果既不是休息日，也没有打卡，则中断
+                        isContinuous = false;
+                        break;
+                    }
+                    
+                    if (isContinuous) {
+                        habit.stats.currentStreak++;
+                    } else {
+                        habit.stats.currentStreak = 1; // 从今天开始计算
+                    }
+                    
+                } else if (status === 'fail' && habit.type === 'abstinence') {
+                    habit.stats.currentStreak = 0; // 戒断失败，连击中断
+                } else if (status === 'success' && habit.type === 'abstinence') {
+                     // 戒断型比较复杂，需要遍历历史记录来计算连击
+                    let streakCount = 0;
+                    let tempDate = dayjs(today);
+                    
+                    // 从今天开始向前遍历，直到遇到失败记录或开始日期
+                    while(tempDate.isSameOrAfter(dayjs(habit.dateRange.start))) {
+                        const currentDate = tempDate.format('YYYY-MM-DD');
+                        
+                        // 如果是休息日，跳过（不中断连击，不计入计数）
+                        if (isDateARestDay(habit, currentDate)) {
+                            tempDate = tempDate.subtract(1, 'day');
+                            continue;
+                        }
+                        
+                        // 检查是否有失败记录
+                        const isFail = habit.stats.history.some(h => h.date === currentDate && h.status === 'fail');
+                        
+                        if (isFail) {
+                            break; // 遇到失败，连击中断
+                        } else {
+                            streakCount++;
+                        }
+                        
+                        tempDate = tempDate.subtract(1, 'day');
+                    }
+                    
+                    habit.stats.currentStreak = streakCount;
+                }
+
+                if (habit.stats.maxStreak < habit.stats.currentStreak) {
+                    habit.stats.maxStreak = habit.stats.currentStreak;
+                }
+            };
+
+            const calculateRate = (habit) => {
+                if (!habit.stats.history || habit.stats.history.length === 0) return 0;
+
+                const startDate = dayjs(habit.dateRange.start);
+                const today = dayjs();
+                
+                // 计算实际周期内的天数，排除休息日
+                let totalActionableDays = 0;
+                let currentDate = startDate;
+                while (currentDate.isSameOrBefore(today)) {
+                    if (!isDateARestDay(habit, currentDate.format('YYYY-MM-DD'))) {
+                         totalActionableDays++;
+                    }
+                    currentDate = currentDate.add(1, 'day');
+                }
+                
+                if (totalActionableDays <= 0) return 0; 
+                
+                let successCount = 0;
+                if (habit.type === 'action') {
+                     // 统计已完成的任务数 (已完成的任务必然发生在非休息日)
+                     successCount = tasks.value.filter(t => t.habitId === habit.id && t.isGeneratedFromHabit && t.status === '已完成').length;
+                } else if (habit.type === 'abstinence') {
+                     // 统计没有失败记录的天数
+                     const failCount = habit.stats.history.filter(h => h.status === 'fail').length;
+                     successCount = totalActionableDays - failCount;
+                }
+
+
+                return Math.round((successCount / totalActionableDays) * 100);
+            };
+
+            // --- 习惯 CRUD ---
+            const openHabitModal = (mode, habit) => {
+                modalMode.value = mode;
+                if(mode==='create') {
+                    editingHabit.value = {
+                        id: generateUniqueId('h_'),
+                        name: '',
+                        type: 'action',
+                        active: true,
+                        desc: '',
+                        dateRange: { start: todayDate, end: dayjs().add(1,'year').format('YYYY-MM-DD') },
+                        stats: { currentStreak: 0, maxStreak: 0, history: [] },
+                        defaultTime: '09:00',
+                        duration: 30, // NEW: Break strategy defaults
+                        breakCycleN: 7,
+                        breakDays: []
+                    };
+                } else {
+                    const tempHabit = JSON.parse(JSON.stringify(habit));
+                    if (tempHabit.breakCycleN === undefined) tempHabit.breakCycleN = 7;
+                    if (tempHabit.breakDays === undefined) tempHabit.breakDays = [];
+                    editingHabit.value = tempHabit;
+                }
+                showHabitModal.value = true;
+            };
+
+            const saveHabit = () => {
+                // 戒断型习惯不应有默认时间/时长
+                if (editingHabit.value.type === 'abstinence') {
+                    editingHabit.value.defaultTime = '';
+                    editingHabit.value.duration = 0;
+                }
+
+                if (!editingHabit.value.name) {
+                    alert('习惯名称不能为空');
+                    return;
+                }
+
+                if (modalMode.value === 'create') {
+                    habits.value.push(editingHabit.value);
+                } else {
+                    const index = habits.value.findIndex(h => h.id === editingHabit.value.id);
+                    if (index !== -1) {
+                        habits.value[index] = editingHabit.value;
+                    }
+                }
+                 // 重新计算连击，以防修改了休息策略
+                updateHabitStreak(editingHabit.value, 'none'); 
+
+                showHabitModal.value = false;
+            };
+
+            const deleteHabit = (id) => {
+    // 提示关联任务会被删除
+    if (!confirm('确定删除此习惯模板吗? 关联的任务将会被自动删除。')) return; 
+    habits.value = habits.value.filter(h => h.id !== id);
+    tasks.value = tasks.value.filter(t => t.habitId !== id);
+    projects.value.forEach(p => {
+        p.milestones.forEach(ms => {
+            ms.contents = ms.contents.filter(item => !(item.type === 'habit' && item.refId === id));
+        });
+    });
+};
+            // --- 项目/里程碑 ---
+            const calculateProjectProgress = (project) => {
+                if (project.milestones.length === 0) return 0;
+                let totalItems = 0;
+                let completedItems = 0;
+                
+                project.milestones.forEach(ms => {
+                    ms.contents.forEach(item => {
+                        totalItems++;
+                        if (isItemDone(item)) {
+                            completedItems++;
+                        }
+                    });
+                });
+
+                if (totalItems === 0) return 0;
+                return Math.round((completedItems / totalItems) * 100);
+            };
+
+            const getItemTitle = (item) => {
+                if(item.type==='task') return tasks.value.find(t=>t.id===item.refId)?.title || '未知任务';
+                if(item.type==='habit') return habits.value.find(h=>h.id===item.refId)?.name || '未知习惯';
+                return '未知项目';
+            };
+            
+            const isItemDone = (item) => {
+                if(item.type==='task') return tasks.value.find(t=>t.id===item.refId)?.status==='已完成';
+                if(item.type==='habit') {
+                    // 习惯关联项检查：如果是休息日，也算完成；否则检查今天是否已打卡/失败
+                    const h = habits.value.find(h=>h.id===item.refId);
+                    if (!h) return false;
+                    
+                    const today = dayjs().format('YYYY-MM-DD');
+                    // 如果项目关联的习惯今天是休息日
+                    if (isDateARestDay(h, today)) {
+                        return true;
+                    }
+                    
+                    // 否则，使用 isHabitDoneToday 的逻辑
+                    return isHabitDoneToday(h);
+                }
+                return false;
+            };
+
+            const openProjectModal = (mode, project) => {
+                modalMode.value = mode;
+                if(mode==='create') {
+                    editingProject.value = { id: generateUniqueId('p_'), name: '', milestones: [] };
+                } else {
+                    editingProject.value = JSON.parse(JSON.stringify(project));
+                }
+                showProjectModal.value = true;
+            };
+            const saveProject = () => {
+                if(!editingProject.value.name) {
+                    alert('项目名称不能为空');
+                    return;
+                }
+                if (modalMode.value === 'create') {
+                    projects.value.push(editingProject.value);
+                } else {
+                    const index = projects.value.findIndex(p => p.id === editingProject.value.id);
+                    if (index !== -1) {
+                        projects.value[index] = editingProject.value;
+                    }
+                }
+                showProjectModal.value = false;
+            };
+            const deleteProject = (id) => {
+                if(!confirm('确定删除此项目吗? (不会删除关联的任务/习惯)')) return;
+                projects.value = projects.value.filter(p=>p.id!==id);
+            };
+            
+            const openMilestoneModal = (p) => {
+                currentProject.value = p;
+                editingMilestone.value = { id: generateUniqueId('m_'), name: '', contents: [] };
+                showMilestoneModal.value = true;
+            };
+            const saveMilestone = () => {
+                if(!editingMilestone.value.name) {
+                    alert('里程碑名称不能为空');
+                    return;
+                }
+                // 找到当前项目并添加里程碑
+                const projectRef = projects.value.find(p => p.id === currentProject.value.id);
+                if (projectRef) {
+                    projectRef.milestones.push(editingMilestone.value);
+                }
+                showMilestoneModal.value = false;
+            };
+            const deleteMilestone = (project, msId) => {
+                if(!confirm('确定删除此里程碑吗? (不会删除关联的任务/习惯)')) return;
+                const projectRef = projects.value.find(p => p.id === project.id);
+                if (projectRef) {
+                    projectRef.milestones = projectRef.milestones.filter(ms => ms.id !== msId);
+                }
+            };
+
+            const isItemInMilestone = (milestone, refId) => {
+                return milestone.contents.some(item => item.refId === refId);
+            };
+
+            const openMilestoneContentModal = (p, ms) => {
+                currentProject.value = p;
+                currentMilestone.value = ms;
+                milestoneTab.value = 'task'; // 默认打开任务标签
+                showMilestoneContentModal.value = true;
+            };
+
+            const addToMilestone = (type, refId) => {
+                if(!currentMilestone.value || isItemInMilestone(currentMilestone.value, refId)) return;
+
+                // 如果是任务，且是复习链表父节点，则关联整个链表
+                if (type === 'task') {
+                    const targetTask = tasks.value.find(t => t.id === refId);
+                    if (targetTask && targetTask.childIds.length > 0 && targetTask.preId === null) {
+                        // 关联父节点
+                        currentMilestone.value.contents.push({ type, refId }); 
+                        
+                        // 关联所有子节点
+                        let currentId = targetTask.childIds[0];
+                        let current = targetTask;
+                        while(currentId) {
+                            current = tasks.value.find(t => t.id === currentId);
+                            if (current && !isItemInMilestone(currentMilestone.value, currentId)) {
+                                currentMilestone.value.contents.push({ type, refId: currentId });
+                            }
+                            currentId = current?.childIds[0];
+                        }
+                        alert(`关联成功！已关联复习链表共 ${targetTask.childIds.length + 1} 个节点。`);
+                        return;
+                    }
+                }
+                
+                currentMilestone.value.contents.push({ type, refId });
+            };
+
+            const removeItemFromMilestone = (milestone, refId) => {
+                milestone.contents = milestone.contents.filter(item => item.refId !== refId);
+            };
+
+            // --- 统计视图逻辑 (新增) ---
+            const changeStatsWeek = (off) => {
+                statsWeekStart.value = dayjs(statsWeekStart.value).add(off, 'week').weekday(0).format('YYYY-MM-DD');
+            };
+            
+            const changeStatsMonth = (off) => {
+                statsMonthStart.value = dayjs(statsMonthStart.value).add(off, 'month').startOf('month').format('YYYY-MM-DD');
+            };
+
+            const getHeatmapColor = (count) => {
+                if (count === 0) return 'bg-gray-100';
+                if (count <= 2) return 'bg-green-200';
+                if (count <= 5) return 'bg-green-400';
+                return 'bg-green-600';
+            };
+
+            // 全局统计数据
+            const overallStats = computed(() => {
+                const totalTasks = tasks.value.length;
+                const totalDone = tasks.value.filter(t => t.status === '已完成').length;
+                const completionRate = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+                
+                const activeHabits = habits.value.filter(h => h.active).length;
+                const maxStreak = habits.value.reduce((max, h) => Math.max(max, h.stats.currentStreak), 0);
+
+                return { totalDone, completionRate, activeHabits, maxStreak };
+            });
+
+            // 周统计数据
+            const weeklyStatsData = computed(() => {
+                const start = dayjs(statsWeekStart.value);
+                const data = [];
+                for (let i = 0; i < 7; i++) {
+                    const d = start.add(i, 'day');
+                    const dateStr = d.format('YYYY-MM-DD');
+                    const dayTasks = tasks.value.filter(t => t.plannedDate === dateStr);
+                    data.push({
+                        date: dateStr,
+                        dayName: getWeekDay(dateStr),
+                        total: dayTasks.length,
+                        done: dayTasks.filter(t => t.status === '已完成').length
+                    });
+                }
+                return data;
+            });
+            
+            // 计算周视图的最大值，用于柱状图缩放
+            const weeklyStatsMax = computed(() => {
+                return Math.max(...weeklyStatsData.value.map(d => d.total), 1); // 至少为1防止除零
+            });
+
+            // 月度热力图数据
+            const monthlyHeatmapData = computed(() => {
+                const start = dayjs(statsMonthStart.value);
+                const daysInMonth = start.daysInMonth();
+                const startDayOfWeek = start.weekday(); // 0(Mon) - 6(Sun) based on locale setting
+                
+                const data = [];
+                
+                // 填充前面的空白
+                for(let i=0; i<startDayOfWeek; i++) {
+                    data.push({ isEmpty: true });
+                }
+                
+                // 填充实际日期
+                for(let i=1; i<=daysInMonth; i++) {
+                    const dateStr = start.date(i).format('YYYY-MM-DD');
+                    // 活跃度 = 完成的任务数 + 习惯打卡(粗略计算)
+                    // 这里为了简单，只计算当天完成的任务数量作为热力值
+                    const count = tasks.value.filter(t => t.plannedDate === dateStr && t.status === '已完成').length;
+                    
+                    data.push({
+                        date: dateStr,
+                        count: count,
+                        isEmpty: false
+                    });
+                }
+                return data;
+            });
+
+
+            // --- 暴露给模板 ---
+            return {
+                currentView, compactNavs, tasks, habits, projects, allTasks, // 使用 compactNavs
+                selectedDate, dayTasks, draggedTask, dragStart, dropTask, // 日视图拖拽相关
+                selectedWeekStart, tasksForWeek, weekDays, // 周视图
+                selectedMonthStart, monthCalendar, goToDay, changeMonth, goToTodayMonth, // 月视图
+                filteredShortTasks, todayDate, selectedPriorityFilter, // 优先级筛选
+                shortTermFilterStatus, 
+                shortTermFilterPriority, 
+                shortTermFilterStartDate, 
+                shortTermFilterEndDate,
+                overallStats, weeklyStatsData, weeklyStatsMax, monthlyHeatmapData,
+                statsWeekStart, statsMonthStart, changeStatsWeek, changeStatsMonth, getHeatmapColor,
+                showHabitModal, showTaskModal, showProjectModal, showMilestoneContentModal, modalMode, showMilestoneModal,
+                editingHabit, editingTask, editingProject, currentMilestone, milestoneTab, fileInput, editingMilestone, currentProject,
+                checkInHabit, isHabitDoneToday, saveHabit, deleteHabit, calculateRate,
+                openHabitModal, openTaskModal, saveTask, deleteTask, toggleTaskStatus,
+                openProjectModal, saveProject, deleteProject, calculateProjectProgress, removeItemFromMilestone,
+                openMilestoneModal, openMilestoneContentModal, addToMilestone, getItemTitle, isItemDone, isItemInMilestone, deleteMilestone, saveMilestone, 
+                changeDate, changeWeek, goToTodayWeek, getWeekDay, getTaskPosition,
+                getPriorityColor, getPriorityBorderColor, getPriorityLabel,
+                exportData, triggerImport, handleImport, dayjs,
+                isTodayARestDay 
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
