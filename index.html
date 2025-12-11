@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-152x152.png">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isBetween.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/weekday.js"></script>
@@ -43,9 +43,10 @@
 <body class="h-screen w-screen overflow-hidden flex flex-col">
 
 <div id="app" class="flex-1 flex flex-col h-full overflow-hidden">
-        <div class="space-x-3">
-            <button @click="triggerImport" class="text-sm text-gray-600 hover:text-blue-600">📥 导入数据</button>
-            <button @click="exportData" class="text-sm text-gray-600 hover:text-green-600">📤 导出数据</button>
+        <div class="space-x-3 flex items-center">
+            <button @click="triggerImport" class="text-sm text-gray-600 hover:text-blue-600">📥 本地导入</button>
+            <button @click="exportData" class="text-sm text-gray-600 hover:text-green-600">📤 本地导出</button>
+            <button @click="openCloudSyncModal" class="text-sm text-gray-600 hover:text-purple-600">☁️ 云端同步</button>
             <input type="file" ref="fileInput" @change="handleImport" class="hidden" accept=".json">
         </div>
     </header>
@@ -763,8 +764,51 @@
             </div>
         </div>
     </div>
-
-
+<div v-if="showCloudSyncModal" class="fixed inset-0 bg-black/50 modal-bg flex items-center justify-center p-4">
+    <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-md modal-content" @click.stop>
+        <h3 class="text-xl font-bold mb-4">☁️ 云端同步</h3>
+        
+        <div class="mb-4">
+            <label class="block mb-2 text-sm font-medium">同步密码</label>
+            <input type="password" v-model="cloudPassword" 
+                   placeholder="输入同步密码（6位以上）"
+                   class="w-full p-2 border rounded mb-2">
+            <p class="text-xs text-gray-500">请记住此密码，用于云端数据访问</p>
+        </div>
+        
+        <div class="mb-4">
+            <label class="block mb-2 text-sm font-medium">云端操作</label>
+            <div class="space-y-2">
+                <button @click="uploadToCloud" 
+                        class="w-full py-2 bg-purple-600 text-white rounded hover:bg-purple-700">
+                    📤 上传到云端
+                </button>
+                <button @click="downloadFromCloud" 
+                        class="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                    📥 从云端下载
+                </button>
+                <button @click="checkCloudStatus" 
+                        class="w-full py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                    🔍 检查云端状态
+                </button>
+            </div>
+        </div>
+        
+        <div v-if="cloudMessage" class="p-3 rounded mb-4 text-sm" 
+             :class="cloudMessageType === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+            {{ cloudMessage }}
+        </div>
+        
+        <div v-if="lastSyncTime" class="text-xs text-gray-500 mb-4">
+            最后同步: {{ dayjs(lastSyncTime).format('YYYY-MM-DD HH:mm') }}
+        </div>
+        
+        <div class="flex justify-end space-x-3 mt-6">
+            <button @click="showCloudSyncModal=false; cloudMessage=''" 
+                    class="px-4 py-2 border rounded">关闭</button>
+        </div>
+    </div>
+</div>
 </div>
 
 <script>
@@ -820,7 +864,257 @@
             const appSettings = {
                 defaultReviewIntervals: [1, 2, 4, 7, 15, 30] // 默认复习间隔（天）
             };
+            const supabaseUrl ='https://forssiunltppioadnzgv.supabase.co'
+            const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvcnNzaXVubHRwcGlvYWRuemd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NzAxMzMsImV4cCI6MjA4MTA0NjEzM30.EgGF5aUiCKXRBwEh-pdLmT7hYKd7PFmz-YMW14x7CiA'
+            const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+            const showCloudSyncModal = ref(false);
+            const cloudPassword = ref('');
+            const cloudMessage = ref('');
+            const cloudMessageType = ref(''); // 'success' 或 'error'
+            const lastSyncTime = ref(localStorage.getItem('lastCloudSyncTime') || null);
+            const isSyncing = ref(false);
+            const CLOUD_TABLE_NAME = 'life_os_data';
+            const initCloudTable = async () => {
+    try {
+        // 检查表是否存在
+        const { error } = await supabase
+            .from(CLOUD_TABLE_NAME)
+            .select('id')
+            .limit(1);
+            
+        if (error && error.code === '42P01') { // 表不存在
+            console.log('云端表不存在，需要在 Supabase 控制台手动创建');
+            console.log(`请创建表 ${CLOUD_TABLE_NAME}，包含字段：id, user_id, data, created_at, updated_at`);
+        }
+    } catch (error) {
+        console.error('初始化云端表失败:', error);
+    }
+};
 
+// 打开云端同步模态框
+const openCloudSyncModal = () => {
+    showCloudSyncModal.value = true;
+    cloudMessage.value = '';
+    cloudPassword.value = localStorage.getItem('cloudPassword') || '';
+};
+
+// 检查云端状态
+const checkCloudStatus = async () => {
+    if (!cloudPassword.value) {
+        cloudMessage.value = '请先输入同步密码';
+        cloudMessageType.value = 'error';
+        return;
+    }
+    
+    try {
+        isSyncing.value = true;
+        cloudMessage.value = '检查云端状态中...';
+        
+        const { data, error } = await supabase
+            .from(CLOUD_TABLE_NAME)
+            .select('updated_at')
+            .eq('user_id', cloudPassword.value)
+            .single();
+            
+        if (error) {
+            if (error.code === 'PGRST116') {
+                cloudMessage.value = '云端暂无数据';
+                cloudMessageType.value = 'success';
+            } else {
+                throw error;
+            }
+        } else {
+            cloudMessage.value = `云端有数据，最后更新: ${dayjs(data.updated_at).format('YYYY-MM-DD HH:mm')}`;
+            cloudMessageType.value = 'success';
+        }
+    } catch (error) {
+        console.error('检查云端状态失败:', error);
+        cloudMessage.value = `检查失败: ${error.message}`;
+        cloudMessageType.value = 'error';
+    } finally {
+        isSyncing.value = false;
+    }
+};
+
+// 上传到云端
+const uploadToCloud = async () => {
+    if (!cloudPassword.value || cloudPassword.value.length < 6) {
+        cloudMessage.value = '密码至少需要6位';
+        cloudMessageType.value = 'error';
+        return;
+    }
+    
+    if (!confirm('确定上传当前数据到云端吗？这会覆盖云端现有数据。')) {
+        return;
+    }
+    
+    try {
+        isSyncing.value = true;
+        cloudMessage.value = '上传中...';
+        
+        // 准备数据
+        const dataToUpload = {
+            tasks: tasks.value,
+            habits: habits.value,
+            projects: projects.value,
+            appSettings: appSettings
+        };
+        
+        // 检查是否已存在
+        const { data: existingData } = await supabase
+            .from(CLOUD_TABLE_NAME)
+            .select('id')
+            .eq('user_id', cloudPassword.value)
+            .single();
+        
+        const now = new Date().toISOString();
+        
+        if (existingData) {
+            // 更新现有记录
+            const { error } = await supabase
+                .from(CLOUD_TABLE_NAME)
+                .update({
+                    data: dataToUpload,
+                    updated_at: now
+                })
+                .eq('user_id', cloudPassword.value);
+                
+            if (error) throw error;
+            cloudMessage.value = '云端数据已更新';
+        } else {
+            // 创建新记录
+            const { error } = await supabase
+                .from(CLOUD_TABLE_NAME)
+                .insert({
+                    user_id: cloudPassword.value,
+                    data: dataToUpload,
+                    created_at: now,
+                    updated_at: now
+                });
+                
+            if (error) throw error;
+            cloudMessage.value = '数据已成功上传到云端';
+        }
+        
+        cloudMessageType.value = 'success';
+        lastSyncTime.value = now;
+        localStorage.setItem('lastCloudSyncTime', now);
+        localStorage.setItem('cloudPassword', cloudPassword.value);
+        
+        // 保存密码到本地
+        saveData();
+        
+    } catch (error) {
+        console.error('上传到云端失败:', error);
+        cloudMessage.value = `上传失败: ${error.message}`;
+        cloudMessageType.value = 'error';
+    } finally {
+        isSyncing.value = false;
+    }
+};
+
+// 从云端下载
+const downloadFromCloud = async () => {
+    if (!cloudPassword.value) {
+        cloudMessage.value = '请先输入同步密码';
+        cloudMessageType.value = 'error';
+        return;
+    }
+    
+    if (!confirm('确定从云端下载数据吗？这会覆盖本地所有数据。')) {
+        return;
+    }
+    
+    try {
+        isSyncing.value = true;
+        cloudMessage.value = '下载中...';
+        
+        const { data, error } = await supabase
+            .from(CLOUD_TABLE_NAME)
+            .select('data, updated_at')
+            .eq('user_id', cloudPassword.value)
+            .single();
+            
+        if (error) {
+            if (error.code === 'PGRST116') {
+                cloudMessage.value = '云端没有找到数据，请检查密码';
+                cloudMessageType.value = 'error';
+            } else {
+                throw error;
+            }
+            return;
+        }
+        
+        if (data && data.data) {
+            // 覆盖本地数据
+            tasks.value = data.data.tasks || [];
+            habits.value = data.data.habits || [];
+            projects.value = data.data.projects || [];
+            Object.assign(appSettings, data.data.appSettings || {});
+            
+            // 确保数据结构
+            tasks.value.forEach(t => {
+                if (!t.childIds) t.childIds = [];
+                if (!t.preId) t.preId = null;
+            });
+            
+            habits.value.forEach(h => {
+                if (h.breakCycleN === undefined) h.breakCycleN = 7;
+                if (h.breakDays === undefined) h.breakDays = [];
+            });
+            
+            projects.value.forEach(p => {
+                if (!p.milestones) p.milestones = [];
+                p.milestones.forEach(ms => {
+                    if (!ms.contents) ms.contents = [];
+                });
+            });
+            
+            // 导入后重新检查习惯生成
+            checkDailyHabitGeneration(true);
+            saveData();
+            
+            cloudMessage.value = '数据已成功从云端下载';
+            cloudMessageType.value = 'success';
+            lastSyncTime.value = data.updated_at;
+            localStorage.setItem('lastCloudSyncTime', data.updated_at);
+            localStorage.setItem('cloudPassword', cloudPassword.value);
+            
+            // 显示数据统计
+            const taskCount = tasks.value.length;
+            const habitCount = habits.value.length;
+            const projectCount = projects.value.length;
+            cloudMessage.value += ` (${taskCount}任务, ${habitCount}习惯, ${projectCount}项目)`;
+        }
+    } catch (error) {
+        console.error('从云端下载失败:', error);
+        cloudMessage.value = `下载失败: ${error.message}`;
+        cloudMessageType.value = 'error';
+    } finally {
+        isSyncing.value = false;
+    }
+};
+const autoBackupToCloud = async () => {
+    const lastBackup = localStorage.getItem('lastAutoBackup');
+    const today = dayjs().format('YYYY-MM-DD');
+    
+    if (lastBackup !== today && cloudPassword.value) {
+        try {
+            await uploadToCloud();
+            localStorage.setItem('lastAutoBackup', today);
+            console.log('自动备份完成');
+        } catch (error) {
+            console.error('自动备份失败:', error);
+        }
+    }
+};
+// 在 onMounted 中添加初始化
+onMounted(() => {
+    loadData();
+    checkDailyHabitGeneration();
+    initCloudTable();
+    autoBackupToCloud();
+});
             // 日历/时间相关
             const todayDate = dayjs().format('YYYY-MM-DD');
             const selectedDate = ref(todayDate);
@@ -2098,8 +2392,6 @@ const deleteHabit = (id) => {
                 }
                 return data;
             });
-
-
             // --- 暴露给模板 ---
             return {
                 currentView, compactNavs, tasks, habits, projects, allTasks, // 使用 compactNavs
@@ -2109,6 +2401,16 @@ const deleteHabit = (id) => {
                 selectedWeekStart, tasksForWeek, weekDays, // 周视图
                 selectedMonthStart, monthCalendar, goToDay, changeMonth, goToTodayMonth, // 月视图
                 filteredShortTasks, todayDate, selectedPriorityFilter, // 优先级筛选
+                showCloudSyncModal,
+                cloudPassword,
+                cloudMessage,
+                cloudMessageType,
+                lastSyncTime,
+                isSyncing,
+                openCloudSyncModal,
+                uploadToCloud,
+                downloadFromCloud,
+                checkCloudStatus,
                 shortTermFilterStatus, 
                 shortTermFilterPriority, 
                 shortTermFilterStartDate, 
