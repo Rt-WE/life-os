@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#3b82f6">
+    
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -24,7 +28,7 @@
     </script>
     
     <style>
-        body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5; }
+        body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5;padding-bottom: env(safe-area-inset-bottom);}
         /* 冲突任务标红 */
         .conflict-border { border: 2px solid #ef4444 !important; background-color: #fef2f2 !important; }
         .timeline-slot { transition: all 0.3s ease; }
